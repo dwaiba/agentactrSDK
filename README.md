@@ -38,7 +38,6 @@
 [![Docker Main](https://github.com/dwaiba/agentactrSDK/actions/workflows/docker-main.yml/badge.svg)](https://github.com/dwaiba/agentactrSDK/actions/workflows/docker-main.yml)
 [![Nightly](https://github.com/dwaiba/agentactrSDK/actions/workflows/nightly.yml/badge.svg)](https://github.com/dwaiba/agentactrSDK/actions/workflows/nightly.yml)
 [![Release](https://github.com/dwaiba/agentactrSDK/actions/workflows/release.yml/badge.svg)](https://github.com/dwaiba/agentactrSDK/actions/workflows/release.yml)
-[![Agentactr Dogfood](https://github.com/dwaiba/agentactrSDK/actions/workflows/agentactr-dogfood.yml/badge.svg)](https://github.com/dwaiba/agentactrSDK/actions/workflows/agentactr-dogfood.yml)
 
 `agentactrSDK` is a Rust workspace for a strict, provider-neutral coding-agent orchestration SDK plus the default `agentactr` CLI product. The current default product is intentionally opinionated around Codex, GitHub Issues, Git worktrees, local artifacts, JSONL/SQLite run state, and Linux userspace memory controls. The architecture is still adapter-first: Codex, GitHub, Git, Linux memory, quality gates, stores, and observability are concrete implementations behind provider-neutral contracts.
 
