@@ -44,6 +44,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v4
       - uses: depot/setup-action@v1
 
       - name: Check Depot configuration

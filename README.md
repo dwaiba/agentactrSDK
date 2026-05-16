@@ -9,6 +9,9 @@
   * [Table Of Documents](#table-of-documents)
   * [Current Architecture](#current-architecture)
   * [Build And Version Provenance](#build-and-version-provenance)
+  * [Install And PATH Management](#install-and-path-management)
+    * [Recommended Mac Unattended Defaults](#recommended-mac-unattended-defaults)
+    * [Issue Creation, LLM Resolution, And Manual Merge](#issue-creation-llm-resolution-and-manual-merge)
   * [Default CLI Surface](#default-cli-surface)
   * [Configuration Files](#configuration-files)
   * [Run Issue Flow](#run-issue-flow)
@@ -144,6 +147,244 @@ The version string is generated from:
 - `AGENTACTR_BUILD_RUSTC_VERSION`
 
 The build script captures those values in [crates/agentactr-cli/build.rs](crates/agentactr-cli/build.rs). If Git `HEAD` cannot be resolved, the Git SHA degrades to `unknown` as required by [specs_agentactrSDK.md:288](specs_agentactrSDK.md#L288).
+
+## Install And PATH Management
+
+![Install and PATH management](internal_readme/install_path_management.svg)
+
+Release archives contain a single native `agentactr` binary named with its version and target triple. After downloading a release archive, install it into a user-writable bin directory with the conservative installer:
+
+```bash
+tar -xzf agentactr-0.1.0-aarch64-apple-darwin.tar.gz
+scripts/install-agentactr.sh --source agentactr-0.1.0-aarch64-apple-darwin
+```
+
+Default behavior:
+
+- installs to `$HOME/.local/bin/agentactr`;
+- accepts `--bin-dir PATH` for another install location;
+- verifies the installed binary with `agentactr --version`;
+- prints shell-specific PATH instructions;
+- never edits shell profiles unless `--update-shell-profile` is passed;
+- never installs completions unless `--install-completions` is passed.
+
+Examples:
+
+```bash
+scripts/install-agentactr.sh \
+  --source agentactr-0.1.0-aarch64-apple-darwin \
+  --bin-dir "$HOME/.local/bin"
+
+scripts/install-agentactr.sh \
+  --source agentactr-0.1.0-aarch64-apple-darwin \
+  --shell zsh \
+  --install-completions
+
+scripts/install-agentactr.sh \
+  --source agentactr-0.1.0-aarch64-apple-darwin \
+  --shell zsh \
+  --update-shell-profile
+```
+
+Manual PATH guidance by shell:
+
+```bash
+# zsh: add to ~/.zshrc
+export PATH="$HOME/.local/bin:$PATH"
+
+# bash: add to ~/.bashrc, or ~/.bash_profile on macOS login shells
+export PATH="$HOME/.local/bin:$PATH"
+
+# fish
+fish_add_path ~/.local/bin
+
+# PowerShell
+# Add ~/.local/bin to the user PATH or profile explicitly.
+
+# Elvish: add to ~/.config/elvish/rc.elv
+set paths = [~/.local/bin $@paths]
+```
+
+Completion generation remains CLI-owned and explicit:
+
+```bash
+agentactr completions bash
+agentactr completions zsh
+agentactr completions fish
+agentactr completions powershell
+agentactr completions elvish
+```
+
+There is no Homebrew formula in the present repo state. Release automation currently packages native binary archives; Homebrew packaging should be added as a separate release surface with its own tests and provenance checks.
+
+### Recommended Mac Unattended Defaults
+
+![Recommended Mac unattended defaults](internal_readme/mac_unattended_defaults.svg)
+
+For a trusted local macOS checkout where unattended runs should write inside the workspace without prompting, start with secure review gates and native macOS observe-only execution:
+
+```bash
+export GITHUB_TOKEN=...
+
+agentactr init --yes --repo <OWNER/REPONAME>
+agentactr config set tracker.token_env GITHUB_TOKEN
+
+agentactr config set repository.declared_primary_stack <typescript|rust|golang|python>
+agentactr config set quality.profile standard
+agentactr config set quality.pre_commit_mode required
+agentactr config set quality.fail_on_missing_toolchain true
+agentactr config set quality.fail_on_untracked_generated_files true
+
+agentactr config set github.finalization require_human_review
+agentactr config set github.project_automation disabled
+agentactr config set merge.mode disabled
+agentactr config set merge.push disabled
+
+agentactr config set execution.backend native_macos_observe_only
+agentactr config set execution.strict_memory_required false
+
+agentactr config set codex.sandbox_mode workspace-write
+agentactr config set codex.approval_policy never
+agentactr config set codex.network off
+
+agentactr config set human_intervention.mode fail_closed
+agentactr config set human_intervention.on_codex_approval_request fail_run
+
+agentactr doctor --fix-codex-config
+agentactr doctor --trust-codex-project
+agentactr quality plan
+```
+
+For long unattended runs that need dependency installs or web/network access, add:
+
+```bash
+agentactr config set codex.network on
+agentactr doctor --fix-codex-config
+```
+
+That maps into generated `.codex/config.toml` as `sandbox_workspace_write.network_access = true`. OpenAI's Codex docs describe `workspace-write` as the lower-friction local mode, and network access is separately controlled for workspace-write [3]. Keep `approval_policy = "never"` only when you are comfortable with non-prompted network commands in a trusted repo.
+
+Filesystem writes to temp:
+
+Current `agentactr config set` does not expose Codex `sandbox_workspace_write.writable_roots`. The generated `.codex/config.toml` currently sets network access, but not extra writable roots.
+
+Prefer repo-local temp first:
+
+```bash
+mkdir -p .agentactr/tmp
+export TMPDIR="$PWD/.agentactr/tmp"
+```
+
+If you truly need `/tmp` or macOS temp roots, manually add this after `agentactr doctor --fix-codex-config`:
+
+```toml
+[sandbox_workspace_write]
+network_access = true
+writable_roots = ["/tmp", "/private/tmp"]
+exclude_slash_tmp = false
+exclude_tmpdir_env_var = false
+```
+
+Avoid broad `/var/folders` unless a tool absolutely requires it; on macOS that is where `$TMPDIR` often resolves, but it is a much wider permission surface.
+
+Git defaults for real release or public usage:
+
+```bash
+agentactr config set vcs.workspace_strategy worktree
+agentactr config set vcs.base_ref origin/main
+agentactr config set vcs.record_base_commit true
+agentactr config set vcs.copy_runtime_config_to_worktree true
+agentactr config set vcs.detect_cross_issue_file_overlap true
+agentactr config set vcs.overlap_policy fail_closed
+```
+
+Safer public default:
+
+```bash
+agentactr config set vcs.fail_on_dirty_source_checkout true
+```
+
+Use this only when intentionally dogfooding from a dirty local source checkout:
+
+```bash
+agentactr config set vcs.fail_on_dirty_source_checkout false
+```
+
+One missing product gap:
+
+A useful hardening slice would add first-class `agentactr config` keys for:
+
+```text
+codex.workspace_writable_roots
+codex.workspace_exclude_slash_tmp
+codex.workspace_exclude_tmpdir_env_var
+```
+
+Then `agentactr doctor --fix-codex-config` can render temp-write policy without manual TOML edits. Right now, manual `.codex/config.toml` editing is the only path for extra writable roots.
+
+### Issue Creation, LLM Resolution, And Manual Merge
+
+Use this path when you want agentactr to help create GitHub issues, run an LLM against one issue, then review and merge manually.
+
+```bash
+# 1. Inspect existing GitHub issues without running agents or mutating GitHub.
+agentactr issue find --repo <OWNER/REPONAME> --limit 50 --json
+
+# 2. Draft local issue proposals from a reviewed prompt and repo evidence.
+agentactr issue draft \
+  --repo <OWNER/REPONAME> \
+  --prompt "Break this work into small independently implementable issues." \
+  --stack <typescript|rust|golang|python> \
+  --framework <nextjs|none> \
+  --codex-draft \
+  --codex-review \
+  --json
+
+# 3. Review local proposals before GitHub mutation.
+agentactr issue proposals <ISSUE_SET_ID>
+
+# 4. Submit one reviewed proposal to GitHub.
+agentactr issue submit <ISSUE_SET_ID> \
+  --proposal <PROPOSAL_ID> \
+  --yes \
+  --require-codex-review
+
+# 5. Let Codex work on an existing GitHub issue in an isolated worktree.
+agentactr run issue --repo <OWNER/REPONAME> --issue <ISSUE_NUMBER>
+
+# 6. Inspect the result locally.
+agentactr vcs status <RUN_ID>
+agentactr vcs diff <RUN_ID>
+agentactr quality run <RUN_ID>
+
+# 7. Approve or reject tracker finalization after human review.
+agentactr finalize <RUN_ID> --approve
+agentactr finalize <RUN_ID> --reject --reason "needs manual follow-up"
+```
+
+Manual patch and merge path:
+
+```bash
+# Read the generated patch artifact path.
+agentactr vcs diff <RUN_ID>
+
+# Apply manually from the source checkout after reviewing the patch.
+git apply .agentactr/artifacts/<RUN_ID>/workspace.diff.patch
+
+# Run project checks, then commit and push through normal Git workflow.
+agentactr quality plan
+git status
+git add -A
+git commit -m "agentactr: resolve issue <ISSUE_NUMBER>"
+git push
+```
+
+Notes:
+
+- `issue find`, `issue draft`, and `issue proposals` are local/read-only until `issue submit --yes`.
+- `--codex-draft` asks Codex to draft structured proposals; `--codex-review` records a separate Codex review artifact before submission.
+- `run issue` creates an isolated worktree and artifacts; current merge/commit commands are milestone surfaces, so apply, commit, push, and PR/merge remain manual.
+- `finalize --approve` updates tracker lifecycle state after review; it is not a Git merge.
 
 ## Default CLI Surface
 
@@ -857,3 +1098,5 @@ When changing source behavior:
 [1] Depot, "Container builds in GitHub Actions," Depot Documentation. [Online]. Available: https://depot.dev/docs/container-builds/integrations/github-actions. [Accessed: May 16, 2026].
 
 [2] Docker, "Validating build configuration with GitHub Actions," Docker Docs. [Online]. Available: https://docs.docker.com/build/ci/github-actions/checks/. [Accessed: May 16, 2026].
+
+[3] OpenAI, "Configuration Reference," Codex Documentation. [Online]. Available: https://developers.openai.com/codex/config-reference. [Accessed: May 16, 2026].

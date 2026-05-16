@@ -13104,11 +13104,12 @@ redact_secrets = false
             assert!(workflow.contains("depot/build-push-action@v1"));
             assert!(workflow.contains("project: ${{ vars.DEPOT_PROJECT_ID }}"));
             assert!(workflow.contains("token: ${{ secrets.DEPOT_TOKEN }}"));
-            assert!(!workflow.contains("docker/setup-qemu-action@"));
             assert!(!workflow.contains("docker/setup-buildx-action@"));
             assert!(!workflow.contains("scripts/build-agentactr-runtime.sh"));
             assert!(!workflow.contains("scripts/build-agentactr-cli-static.sh"));
         }
+        assert!(!release.contains("docker/setup-qemu-action@"));
+        assert!(nightly.contains("docker/setup-qemu-action@"));
     }
 
     #[test]

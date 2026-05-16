@@ -36,6 +36,14 @@ repos:
         always_run: true
         stages: [pre-commit]
 
+      - id: shell-script-syntax
+        name: shell script syntax
+        entry: bash -c 'for script in scripts/*.sh; do bash -n "$script"; done'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
       - id: github-workflow-gates
         name: GitHub workflow merge gates
         entry: scripts/check-github-workflow-gates.sh

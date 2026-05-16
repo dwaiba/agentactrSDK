@@ -65,15 +65,29 @@ for workflow in .github/workflows/nightly.yml .github/workflows/release.yml .git
   rg -n 'depot/build-push-action@' "${workflow}" >/dev/null
   rg -n 'project: \$\{\{ vars\.DEPOT_PROJECT_ID \}\}' "${workflow}" >/dev/null
   rg -n 'token: \$\{\{ secrets\.DEPOT_TOKEN \}\}' "${workflow}" >/dev/null
-  if rg -n 'docker/setup-buildx-action@|docker/setup-qemu-action@|scripts/build-agentactr-(runtime|cli-static)\.sh' "${workflow}"; then
+  if rg -n 'docker/setup-buildx-action@|scripts/build-agentactr-(runtime|cli-static)\.sh' "${workflow}"; then
     printf 'Trusted Docker image builds must use Depot, not local buildx scripts: %s\n' "${workflow}" >&2
     exit 1
   fi
 done
 
+rg -n 'docker/setup-qemu-action@' .github/workflows/nightly.yml >/dev/null
+rg -n 'DOCKER_PLATFORM|--platform "\$\{DOCKER_PLATFORM\}"' scripts/verify-agentactr-images.sh >/dev/null
+
 rg -n '^  push:$' .github/workflows/docker-main.yml >/dev/null
 rg -n '^      - main$' .github/workflows/docker-main.yml >/dev/null
 rg -n 'call: check' .github/workflows/docker-main.yml >/dev/null
+
+rg -n 'x86_64-unknown-linux-gnu' .github/workflows/release.yml >/dev/null
+rg -n 'aarch64-unknown-linux-gnu' .github/workflows/release.yml >/dev/null
+rg -n 'aarch64-apple-darwin' .github/workflows/release.yml >/dev/null
+rg -n 'ubuntu-24.04-arm' .github/workflows/release.yml >/dev/null
+rg -n '"self-hosted","macOS","ARM64","agentactr-release-macos-arm64"' .github/workflows/release.yml >/dev/null
+rg -n 'actions/download-artifact@v7' .github/workflows/release.yml >/dev/null
+rg -n 'release_notes:' .github/workflows/release.yml >/dev/null
+test -f docs/releases/0.1.0.md
+test -x scripts/trigger-release.sh
+rg -n 'docs/releases/\$\{VERSION\}\.md' scripts/trigger-release.sh >/dev/null
 
 if rg -n 'scripts/build-agentactr-(runtime|cli-static)\.sh|PUSH: "1"|--push' \
   .github/workflows/build.yml .github/workflows/ci.yml .github/workflows/architecture.yml .github/workflows/security.yml; then

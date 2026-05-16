@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="430" viewBox="0 0 1120 430" role="img" aria-labelledby="title desc">
+  <title id="title">Recommended Mac unattended defaults</title>
+  <desc id="desc">Shows the recommended local macOS unattended configuration flow with review-gated GitHub mutation, workspace-write Codex sandboxing, optional network, and repo-local temp preference.</desc>
+  <style>
+    .box{fill:#f8fafc;stroke:#334155;stroke-width:1.5;rx:8}
+    .safe{fill:#ecfdf5;stroke:#047857;stroke-width:1.5;rx:8}
+    .warn{fill:#fff7ed;stroke:#c2410c;stroke-width:1.5;rx:8}
+    .data{fill:#eef2ff;stroke:#4338ca;stroke-width:1.5;rx:8}
+    .text{font-family:Arial,sans-serif;font-size:15px;fill:#0f172a}
+    .small{font-family:Arial,sans-serif;font-size:12px;fill:#334155}
+    .arrow{stroke:#334155;stroke-width:1.5;fill:none;marker-end:url(#arrow)}
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+  </defs>
+
+  <rect x="35" y="50" width="205" height="100" class="data"/>
+  <text x="55" y="83" class="text">init and token env</text>
+  <text x="55" y="109" class="small">init --yes --repo</text>
+  <text x="55" y="127" class="small">tracker.token_env</text>
+  <path d="M240 100 H310" class="arrow"/>
+
+  <rect x="310" y="50" width="220" height="100" class="safe"/>
+  <text x="330" y="83" class="text">quality and repo policy</text>
+  <text x="330" y="109" class="small">declared stack</text>
+  <text x="330" y="127" class="small">standard profile, required hooks</text>
+  <path d="M530 100 H600" class="arrow"/>
+
+  <rect x="600" y="50" width="220" height="100" class="safe"/>
+  <text x="620" y="83" class="text">review-gated mutation</text>
+  <text x="620" y="109" class="small">finalization requires review</text>
+  <text x="620" y="127" class="small">merge and push disabled</text>
+  <path d="M820 100 H890" class="arrow"/>
+
+  <rect x="890" y="50" width="195" height="100" class="box"/>
+  <text x="910" y="83" class="text">macOS backend</text>
+  <text x="910" y="109" class="small">native_macos_observe_only</text>
+  <text x="910" y="127" class="small">strict memory false</text>
+
+  <rect x="175" y="235" width="230" height="105" class="safe"/>
+  <text x="195" y="268" class="text">Codex workspace-write</text>
+  <text x="195" y="294" class="small">approval_policy = never</text>
+  <text x="195" y="312" class="small">network off by default</text>
+  <path d="M987 150 C987 200 300 185 290 235" class="arrow"/>
+
+  <rect x="465" y="235" width="230" height="105" class="warn"/>
+  <text x="485" y="268" class="text">optional network</text>
+  <text x="485" y="294" class="small">codex.network on</text>
+  <text x="485" y="312" class="small">trusted repo only</text>
+  <path d="M405 288 H465" class="arrow"/>
+
+  <rect x="755" y="235" width="245" height="105" class="box"/>
+  <text x="775" y="268" class="text">temp write policy</text>
+  <text x="775" y="294" class="small">prefer .agentactr/tmp</text>
+  <text x="775" y="312" class="small">manual writable_roots if needed</text>
+  <path d="M695 288 H755" class="arrow"/>
+
+  <rect x="365" y="370" width="390" height="40" class="box"/>
+  <text x="385" y="395" class="small">Docker on Mac remains contingency/fallback for strict Linux memory; it increases local startup and setup cost.</text>
+</svg>

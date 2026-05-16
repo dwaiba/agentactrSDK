@@ -9,6 +9,9 @@ on:
       version:
         description: Release version without leading v
         required: true
+      release_notes:
+        description: Optional curated release notes to place above generated notes
+        required: false
 
 permissions:
   contents: write
@@ -21,15 +24,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  release:
-    name: Build and publish release artifacts
+  resolve-version:
+    name: Resolve release version
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: depot/setup-action@v1
-
       - name: Resolve version
         id: version
         run: |
@@ -39,15 +40,94 @@ jobs:
           else
             version="${GITHUB_REF_NAME#v}"
           fi
+          test -n "${version}" || { echo "release version is required" >&2; exit 1; }
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+  build-binaries:
+    name: Build CLI binary (${{ matrix.target }})
+    needs: resolve-version
+    runs-on: ${{ fromJSON(matrix.runs_on) }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runs_on: '["ubuntu-latest"]'
+            binary_path: target/release/agentactr
+          - target: aarch64-unknown-linux-gnu
+            runs_on: '["ubuntu-24.04-arm"]'
+            binary_path: target/release/agentactr
+          - target: aarch64-apple-darwin
+            runs_on: '["self-hosted","macOS","ARM64","agentactr-release-macos-arm64"]'
+            binary_path: target/release/agentactr
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify native target
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          host="$(rustc -vV | awk '/^host:/ { print $2 }')"
+          test "${host}" = "${TARGET}" || {
+            echo "runner host ${host} does not match release target ${TARGET}" >&2
+            exit 1
+          }
 
       - name: Build release binary
         run: cargo build --release --bin agentactr
 
-      - name: Attest CLI binary
+      - name: Package release binary
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          BINARY_PATH: ${{ matrix.binary_path }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          asset="agentactr-${VERSION}-${TARGET}"
+          cp "${BINARY_PATH}" "dist/${asset}"
+          chmod 0755 "dist/${asset}"
+          tar -C dist -czf "dist/${asset}.tar.gz" "${asset}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "dist/${asset}.tar.gz" > "dist/${asset}.tar.gz.sha256"
+          else
+            shasum -a 256 "dist/${asset}.tar.gz" > "dist/${asset}.tar.gz.sha256"
+          fi
+
+      - name: Attest CLI binary archive
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: target/release/agentactr
+          subject-path: dist/agentactr-*.tar.gz
+
+      - name: Upload CLI binary archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: agentactr-${{ matrix.target }}
+          path: |
+            dist/agentactr-*.tar.gz
+            dist/agentactr-*.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish release artifacts
+    needs:
+      - resolve-version
+      - build-binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: depot/setup-action@v1
+
+      - name: Download CLI binary archives
+        uses: actions/download-artifact@v7
+        with:
+          pattern: agentactr-*
+          path: dist
+          merge-multiple: true
 
       - name: Login to GHCR
         uses: docker/login-action@v4
@@ -76,10 +156,10 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: |
-            ghcr.io/dwaiba/agentactr-runtime:${{ steps.version.outputs.version }}-linux-arm64
+            ghcr.io/dwaiba/agentactr-runtime:${{ needs.resolve-version.outputs.version }}-linux-arm64
             ghcr.io/dwaiba/agentactr-runtime:latest-linux-arm64
           build-args: |
-            AGENTACTR_VERSION=${{ steps.version.outputs.version }}
+            AGENTACTR_VERSION=${{ needs.resolve-version.outputs.version }}
           sbom: true
           provenance: mode=max
 
@@ -94,10 +174,10 @@ jobs:
           platforms: linux/arm64
           push: true
           tags: |
-            ghcr.io/dwaiba/agentactr-cli:${{ steps.version.outputs.version }}-linux-arm64-musl
+            ghcr.io/dwaiba/agentactr-cli:${{ needs.resolve-version.outputs.version }}-linux-arm64-musl
             ghcr.io/dwaiba/agentactr-cli:latest-linux-arm64-musl
           build-args: |
-            AGENTACTR_VERSION=${{ steps.version.outputs.version }}
+            AGENTACTR_VERSION=${{ needs.resolve-version.outputs.version }}
           sbom: true
           provenance: mode=max
 
@@ -111,17 +191,56 @@ jobs:
           printf '%s\n' "${RUNTIME_METADATA}" > .agentactr/image-metadata/agentactr-runtime.json
           printf '%s\n' "${CLI_METADATA}" > .agentactr/image-metadata/agentactr-cli-static.json
 
-      - name: Upload image metadata
-        uses: actions/upload-artifact@v7
-        with:
-          name: agentactr-image-metadata
-          path: .agentactr/image-metadata
-          if-no-files-found: error
+      - name: Write release notes
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          set -euo pipefail
+          mkdir -p .agentactr/release
+          notes=".agentactr/release/release-notes.md"
+          printf 'agentactr %s\n\n' "${VERSION}" > "${notes}"
+          if [ -n "${RELEASE_NOTES:-}" ]; then
+            printf '%s\n\n' "${RELEASE_NOTES}" >> "${notes}"
+          else
+            printf '%s\n' \
+              'Initial public preview release.' \
+              '' \
+              'Highlights:' \
+              '- Rust CLI for provider-neutral coding-agent orchestration.' \
+              '- Default Codex, GitHub, Git, Docker, and local artifact integrations.' \
+              '- Run-scoped artifacts, trace/debug bundles, quality gates, and issue workflows.' \
+              '- Native CLI archives for Linux x86_64, Linux arm64, and Apple Silicon macOS.' \
+              '- Docker runtime and static CLI images for linux/arm64.' \
+              '- Secure-by-default lifecycle, manifest, and replay/audit hardening.' \
+              '' >> "${notes}"
+          fi
+          printf '%s\n' \
+            'Release assets:' \
+            "- \`agentactr-${VERSION}-x86_64-unknown-linux-gnu.tar.gz\`" \
+            "- \`agentactr-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256\`" \
+            "- \`agentactr-${VERSION}-aarch64-unknown-linux-gnu.tar.gz\`" \
+            "- \`agentactr-${VERSION}-aarch64-unknown-linux-gnu.tar.gz.sha256\`" \
+            "- \`agentactr-${VERSION}-aarch64-apple-darwin.tar.gz\`" \
+            "- \`agentactr-${VERSION}-aarch64-apple-darwin.tar.gz.sha256\`" \
+            '' \
+            'Published images:' \
+            "- \`ghcr.io/dwaiba/agentactr-runtime:${VERSION}-linux-arm64\`" \
+            "- \`ghcr.io/dwaiba/agentactr-cli:${VERSION}-linux-arm64-musl\`" \
+            '' \
+            'GHCR may show an additional `unknown/unknown` manifest entry for each image. That entry is the attached BuildKit SBOM/provenance attestation manifest, not a second runnable image platform.' \
+            >> "${notes}"
 
       - name: Create GitHub release
-        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: v${{ needs.resolve-version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: agentactr ${{ needs.resolve-version.outputs.version }}
+          body_path: .agentactr/release/release-notes.md
+          generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            target/release/agentactr
+            dist/agentactr-*.tar.gz
+            dist/agentactr-*.tar.gz.sha256
             .agentactr/image-metadata/*.json
