@@ -1,0 +1,16 @@
+[package]
+name = "agentactr-sdk"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+agentactr-core = { path = "../agentactr-core" }
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+toml = "0.8"
+
+[lib]
+path = "src/lib.rs"

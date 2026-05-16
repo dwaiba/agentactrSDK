@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="430" viewBox="0 0 1080 430" role="img" aria-labelledby="title desc">
+  <title id="title">CLI command surface groups</title>
+  <desc id="desc">Groups implemented and milestone command families by operational purpose.</desc>
+  <style>.box{fill:#f8fafc;stroke:#334155;stroke-width:1.4;rx:8}.safe{fill:#ecfdf5;stroke:#047857;stroke-width:1.4;rx:8}.warn{fill:#fefce8;stroke:#a16207;stroke-width:1.4;rx:8}.text{font-family:Arial,sans-serif;font-size:15px;fill:#0f172a}.small{font-family:Arial,sans-serif;font-size:12px;fill:#334155}.arrow{stroke:#334155;stroke-width:1.5;fill:none;marker-end:url(#arrow)}</style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/></marker></defs>
+  <rect x="455" y="30" width="180" height="70" class="safe"/><text x="485" y="60" class="text">agentactr</text><text x="485" y="82" class="small">typed clap help/catalog</text>
+  <rect x="40" y="150" width="180" height="90" class="box"/><text x="60" y="182" class="text">setup/config</text><text x="60" y="207" class="small">init, doctor, config</text><text x="60" y="223" class="small">auth, completions</text>
+  <rect x="260" y="150" width="180" height="90" class="box"/><text x="280" y="182" class="text">issue planning</text><text x="280" y="207" class="small">find, draft</text><text x="280" y="223" class="small">proposals, submit, mark</text>
+  <rect x="480" y="150" width="180" height="90" class="warn"/><text x="500" y="182" class="text">run execution</text><text x="500" y="207" class="small">run issue</text><text x="500" y="223" class="small">quality, memory</text>
+  <rect x="700" y="150" width="180" height="90" class="box"/><text x="720" y="182" class="text">inspection</text><text x="720" y="207" class="small">trace, debug, vcs</text><text x="720" y="223" class="small">merge plan, repo</text>
+  <rect x="920" y="150" width="120" height="90" class="warn"/><text x="940" y="182" class="text">milestone</text><text x="940" y="207" class="small">daemon, replay</text><text x="940" y="223" class="small">eval, vcs commit</text>
+  <rect x="260" y="310" width="560" height="70" class="safe"/><text x="285" y="340" class="text">Generated reference: docs/cli/reference.md</text><text x="285" y="362" class="small">source for current command syntax, side effects, capabilities and implementation status</text>
+  <path d="M545 100 V150" class="arrow"/><path d="M545 100 C420 125 245 125 130 150" class="arrow"/><path d="M545 100 C465 125 370 125 350 150" class="arrow"/><path d="M545 100 C660 125 770 125 790 150" class="arrow"/><path d="M545 100 C790 125 965 125 980 150" class="arrow"/><path d="M570 240 V310" class="arrow"/>
+</svg>

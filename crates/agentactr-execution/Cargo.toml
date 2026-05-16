@@ -1,0 +1,8 @@
+[package]
+name = "agentactr-execution"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+agentactr-sdk = { path = "../agentactr-sdk" }

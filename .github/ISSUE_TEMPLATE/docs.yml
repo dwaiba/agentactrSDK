@@ -1,0 +1,30 @@
+name: Documentation issue
+description: Report stale, unclear, or missing documentation.
+title: "documentation: "
+labels: ["documentation"]
+body:
+  - type: textarea
+    id: location
+    attributes:
+      label: Documentation location
+      description: Link or path to the stale or missing documentation.
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong or missing?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected correction
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I checked whether README.md, docs/cli/reference.md, and specs_agentactrSDK.md need to stay synchronized.
+          required: true

@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a reproducible defect in agentactr.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please do not include secrets, API keys, tokens, private prompts, or private repository paths.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest command sequence or scenario that reproduces the problem.
+      placeholder: |
+        1. Run ...
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: agentactr version
+      placeholder: "agentactr --version"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS with Docker backend
+        - Linux with cgroup v2
+        - Linux observe-only/degraded
+        - CI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant redacted logs or artifacts
+      description: Attach redacted snippets only. Do not paste raw prompts, tokens, or private logs.
+      render: text
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I checked the README and docs/cli/reference.md.
+          required: true
+        - label: I removed secrets, tokens, private prompts, and private local paths.
+          required: true

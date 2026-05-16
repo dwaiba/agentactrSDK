@@ -1,0 +1,13 @@
+target/
+
+# superseded local source drafts
+specs_v01.md
+Specs.md
+
+# agentactr generated runtime state
+.agentactr/runs/
+.agentactr/artifacts/
+.agentactr/debug/
+.agentactr/image-metadata/
+.agentactr/workspaces/
+.agentactr/worktrees/

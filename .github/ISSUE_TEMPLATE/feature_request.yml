@@ -1,0 +1,51 @@
+name: Feature request
+description: Propose a new capability or supported integration.
+title: "enhancement: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests must preserve the AGENTS.md boundaries: core stays provider-neutral, SDK owns policy/use cases, CLI owns wiring, and concrete providers stay behind adapters.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What operator or SDK problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the expected user-facing and contract behavior.
+    validations:
+      required: true
+  - type: dropdown
+    id: boundary
+    attributes:
+      label: Primary boundary
+      options:
+        - agentactr-core provider-neutral contract
+        - agentactr-sdk use case or policy
+        - agentactr-cli operator surface
+        - Codex adapter
+        - GitHub adapter
+        - Execution/Docker backend
+        - Documentation/spec only
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I checked specs_agentactrSDK.md for the current contract.
+          required: true
+        - label: I understand architectural changes require spec and docs updates.
+          required: true

@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without leading v
+        required: true
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: Build and publish release artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: depot/setup-action@v1
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build release binary
+        run: cargo build --release --bin agentactr
+
+      - name: Attest CLI binary
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: target/release/agentactr
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check Depot configuration
+        env:
+          DEPOT_PROJECT_ID: ${{ vars.DEPOT_PROJECT_ID }}
+          DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${DEPOT_PROJECT_ID}" || { echo "DEPOT_PROJECT_ID repository/action variable is required" >&2; exit 1; }
+          test -n "${DEPOT_TOKEN}" || { echo "DEPOT_TOKEN action secret is required" >&2; exit 1; }
+
+      - name: Build and push runtime image with Depot
+        id: runtime-image
+        uses: depot/build-push-action@v1
+        with:
+          project: ${{ vars.DEPOT_PROJECT_ID }}
+          token: ${{ secrets.DEPOT_TOKEN }}
+          context: .
+          file: docker/agentactr-runtime/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/dwaiba/agentactr-runtime:${{ steps.version.outputs.version }}-linux-arm64
+            ghcr.io/dwaiba/agentactr-runtime:latest-linux-arm64
+          build-args: |
+            AGENTACTR_VERSION=${{ steps.version.outputs.version }}
+          sbom: true
+          provenance: mode=max
+
+      - name: Build and push static CLI image with Depot
+        id: cli-image
+        uses: depot/build-push-action@v1
+        with:
+          project: ${{ vars.DEPOT_PROJECT_ID }}
+          token: ${{ secrets.DEPOT_TOKEN }}
+          context: .
+          file: docker/agentactr-cli-static/Dockerfile
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/dwaiba/agentactr-cli:${{ steps.version.outputs.version }}-linux-arm64-musl
+            ghcr.io/dwaiba/agentactr-cli:latest-linux-arm64-musl
+          build-args: |
+            AGENTACTR_VERSION=${{ steps.version.outputs.version }}
+          sbom: true
+          provenance: mode=max
+
+      - name: Write image metadata
+        env:
+          RUNTIME_METADATA: ${{ steps.runtime-image.outputs.metadata }}
+          CLI_METADATA: ${{ steps.cli-image.outputs.metadata }}
+        run: |
+          set -euo pipefail
+          mkdir -p .agentactr/image-metadata
+          printf '%s\n' "${RUNTIME_METADATA}" > .agentactr/image-metadata/agentactr-runtime.json
+          printf '%s\n' "${CLI_METADATA}" > .agentactr/image-metadata/agentactr-cli-static.json
+
+      - name: Upload image metadata
+        uses: actions/upload-artifact@v6
+        with:
+          name: agentactr-image-metadata
+          path: .agentactr/image-metadata
+          if-no-files-found: error
+
+      - name: Create GitHub release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            target/release/agentactr
+            .agentactr/image-metadata/*.json

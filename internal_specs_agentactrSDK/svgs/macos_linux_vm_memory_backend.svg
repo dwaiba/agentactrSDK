@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="660" viewBox="0 0 1180 660" role="img" aria-label="macOS Linux VM memory backend">
+  <style>
+    .box { fill:#ffffff; stroke:#111827; stroke-width:1.5; rx:8; }
+    .mac { fill:#fff7ed; }
+    .vm { fill:#e8f3ff; }
+    .linux { fill:#ecfdf5; }
+    .agent { fill:#f8fafc; }
+    .warn { fill:#fef2f2; }
+    .title { font:700 15px Arial,sans-serif; fill:#111827; }
+    .txt { font:13px Arial,sans-serif; fill:#111827; }
+    .small { font:12px Arial,sans-serif; fill:#374151; }
+    .line { stroke:#374151; stroke-width:1.4; fill:none; marker-end:url(#arrow); }
+    .dashed { stroke:#6b7280; stroke-width:1.3; stroke-dasharray:7 5; fill:none; marker-end:url(#arrow); }
+  </style>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#374151"/>
+    </marker>
+  </defs>
+
+  <text x="36" y="34" class="title">macOS Strict Memory Path Through a Linux VM Backend</text>
+
+  <rect x="45" y="70" width="1090" height="530" class="box mac"/>
+  <text x="75" y="105" class="title">macOS host</text>
+  <text x="75" y="130" class="small">Native macOS remains the operator desktop and outer process host.</text>
+
+  <rect x="105" y="170" width="280" height="185" class="box warn"/>
+  <text x="132" y="202" class="title">Native macOS mode</text>
+  <text x="132" y="232" class="txt">multi-agent orchestration works</text>
+  <text x="132" y="256" class="txt">memory mode is observe/degraded</text>
+  <text x="132" y="280" class="txt">macOS manages pressure globally</text>
+  <text x="132" y="304" class="txt">agentactr records artifacts</text>
+  <text x="132" y="329" class="small">Conforming only when degraded mode is allowed.</text>
+
+  <rect x="485" y="145" width="570" height="355" class="box vm"/>
+  <text x="515" y="180" class="title">Linux VM or Docker Desktop backend</text>
+  <text x="515" y="205" class="small">Required for Linux-equivalent cgroup/PSI semantics on macOS.</text>
+
+  <rect x="535" y="240" width="210" height="130" class="box linux"/>
+  <text x="560" y="270" class="title">Linux substrate</text>
+  <text x="560" y="298" class="txt">cgroup v2</text>
+  <text x="560" y="322" class="txt">PSI memory pressure</text>
+  <text x="560" y="346" class="txt">procfs process metadata</text>
+
+  <rect x="810" y="240" width="195" height="130" class="box agent"/>
+  <text x="835" y="270" class="title">Run sandbox</text>
+  <text x="835" y="298" class="txt">container or VM process</text>
+  <text x="835" y="322" class="txt">optional gVisor/runsc</text>
+  <text x="835" y="346" class="txt">Codex and toolchain</text>
+
+  <rect x="535" y="405" width="470" height="70" class="box linux"/>
+  <text x="560" y="434" class="title">Per-run and per-agent memory boxes exist inside the Linux backend.</text>
+  <text x="560" y="457" class="txt">The same Linux MemoryController semantics can be used there.</text>
+
+  <rect x="105" y="430" width="280" height="95" class="box agent"/>
+  <text x="132" y="462" class="title">agentactr UX requirement</text>
+  <text x="132" y="492" class="txt">doctor prints selected backend</text>
+  <text x="132" y="516" class="txt">run events record enforcement mode</text>
+
+  <path d="M385 265 L485 265" class="dashed"/>
+  <path d="M745 305 L810 305" class="line"/>
+  <path d="M907 370 C900 390, 880 402, 835 405" class="line"/>
+  <path d="M535 440 C455 435, 405 450, 385 477" class="dashed"/>
+</svg>

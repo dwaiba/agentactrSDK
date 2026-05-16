@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="620" viewBox="0 0 1160 620" role="img" aria-label="Codex app-server contract">
+  <style>
+    .box { fill:#ffffff; stroke:#111827; stroke-width:1.5; rx:8; }
+    .cli { fill:#e8f3ff; }
+    .adapter { fill:#ecfdf5; }
+    .server { fill:#fff7ed; }
+    .policy { fill:#fef2f2; }
+    .store { fill:#f8fafc; }
+    .title { font:700 15px Arial,sans-serif; fill:#111827; }
+    .txt { font:13px Arial,sans-serif; fill:#111827; }
+    .small { font:12px Arial,sans-serif; fill:#374151; }
+    .line { stroke:#374151; stroke-width:1.4; fill:none; marker-end:url(#arrow); }
+    .back { stroke:#2563eb; stroke-width:1.3; fill:none; stroke-dasharray:7 5; marker-end:url(#blueArrow); }
+  </style>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#374151"/>
+    </marker>
+    <marker id="blueArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <text x="36" y="34" class="title">App-Server Contract</text>
+
+  <rect x="45" y="85" width="210" height="135" class="box cli"/>
+  <text x="70" y="115" class="title">agentactr orchestrator</text>
+  <text x="70" y="143" class="txt">run policy snapshot</text>
+  <text x="70" y="167" class="txt">workspace and memory ids</text>
+  <text x="70" y="191" class="txt">agent graph ownership</text>
+
+  <rect x="320" y="65" width="235" height="175" class="box adapter"/>
+  <text x="345" y="95" class="title">Codex app-server adapter</text>
+  <text x="345" y="123" class="txt">initialize session</text>
+  <text x="345" y="147" class="txt">start thread and turn</text>
+  <text x="345" y="171" class="txt">stream normalized events</text>
+  <text x="345" y="195" class="txt">cancel and close session</text>
+  <text x="345" y="219" class="small">feature gated target</text>
+
+  <rect x="650" y="65" width="230" height="175" class="box server"/>
+  <text x="675" y="95" class="title">Codex app-server</text>
+  <text x="675" y="123" class="txt">threads and turns</text>
+  <text x="675" y="147" class="txt">model deltas</text>
+  <text x="675" y="171" class="txt">tool calls and results</text>
+  <text x="675" y="195" class="txt">file and command events</text>
+  <text x="675" y="219" class="small">provider protocol stays here</text>
+
+  <rect x="945" y="65" width="170" height="175" class="box store"/>
+  <text x="968" y="95" class="title">Workspace</text>
+  <text x="968" y="123" class="txt">repo files</text>
+  <text x="968" y="147" class="txt">commands</text>
+  <text x="968" y="171" class="txt">MCP tools</text>
+  <text x="968" y="195" class="txt">artifacts</text>
+
+  <rect x="320" y="330" width="235" height="135" class="box policy"/>
+  <text x="345" y="360" class="title">Approval resolver</text>
+  <text x="345" y="388" class="txt">fail_closed denies</text>
+  <text x="345" y="412" class="txt">interactive prompts</text>
+  <text x="345" y="436" class="txt">auto_policy allow list</text>
+
+  <rect x="650" y="330" width="230" height="135" class="box store"/>
+  <text x="675" y="360" class="title">Normalized RunEvents</text>
+  <text x="675" y="388" class="txt">codex.turn.*</text>
+  <text x="675" y="412" class="txt">codex.tool.*</text>
+  <text x="675" y="436" class="txt">codex.approval.*</text>
+
+  <rect x="945" y="330" width="170" height="135" class="box store"/>
+  <text x="968" y="360" class="title">State sinks</text>
+  <text x="968" y="388" class="txt">JSONL replay</text>
+  <text x="968" y="412" class="txt">SQLite cache</text>
+  <text x="968" y="436" class="txt">debug bundle</text>
+
+  <path d="M255 152 L320 152" class="line"/>
+  <path d="M555 152 L650 152" class="line"/>
+  <path d="M880 152 L945 152" class="line"/>
+  <path d="M650 185 C605 230, 575 295, 555 362" class="back"/>
+  <path d="M555 397 L650 397" class="line"/>
+  <path d="M880 397 L945 397" class="line"/>
+  <path d="M765 240 L765 330" class="line"/>
+  <path d="M437 240 L437 330" class="line"/>
+  <path d="M320 420 C250 390, 225 280, 255 190" class="back"/>
+</svg>

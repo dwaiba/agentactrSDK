@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="640" viewBox="0 0 1160 640" role="img" aria-label="state traceability and debugging">
+  <style>
+    .box { fill:#ffffff; stroke:#111827; stroke-width:1.5; rx:8; }
+    .event { fill:#e8f3ff; }
+    .store { fill:#ecfdf5; }
+    .debug { fill:#fff7ed; }
+    .check { fill:#fef2f2; }
+    .title { font:700 15px Arial,sans-serif; fill:#111827; }
+    .txt { font:13px Arial,sans-serif; fill:#111827; }
+    .small { font:12px Arial,sans-serif; fill:#374151; }
+    .line { stroke:#374151; stroke-width:1.4; fill:none; marker-end:url(#arrow); }
+    .replay { stroke:#2563eb; stroke-width:1.4; fill:none; stroke-dasharray:7 5; marker-end:url(#blueArrow); }
+  </style>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#374151"/>
+    </marker>
+    <marker id="blueArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <text x="36" y="34" class="title">State, Traceability, and Debugging</text>
+
+  <rect x="45" y="70" width="230" height="165" class="box event"/>
+  <text x="70" y="100" class="title">State changes</text>
+  <text x="70" y="128" class="txt">scheduler, claim, workspace</text>
+  <text x="70" y="152" class="txt">Codex turns and tools</text>
+  <text x="70" y="176" class="txt">memory and quality</text>
+  <text x="70" y="200" class="txt">commit and finalization</text>
+
+  <rect x="345" y="60" width="250" height="185" class="box event"/>
+  <text x="370" y="90" class="title">RunEvent schema</text>
+  <text x="370" y="118" class="txt">schema_version</text>
+  <text x="370" y="142" class="txt">ISO ts, run_id, issue_id</text>
+  <text x="370" y="166" class="txt">agent_run_id and parent</text>
+  <text x="370" y="190" class="txt">event_type and spans</text>
+  <text x="370" y="214" class="txt">payload</text>
+
+  <rect x="675" y="60" width="210" height="185" class="box store"/>
+  <text x="700" y="90" class="title">Durable stores</text>
+  <text x="700" y="118" class="txt">JSONL source of truth</text>
+  <text x="700" y="142" class="txt">SQLite operational cache</text>
+  <text x="700" y="166" class="txt">artifact directory</text>
+  <text x="700" y="190" class="txt">OTLP traces</text>
+  <text x="700" y="214" class="small">all keyed by RUN_ID</text>
+
+  <rect x="955" y="70" width="160" height="165" class="box check"/>
+  <text x="980" y="100" class="title">Reducer</text>
+  <text x="980" y="128" class="txt">rebuild run state</text>
+  <text x="980" y="152" class="txt">compare SQLite</text>
+  <text x="980" y="176" class="txt">report divergence</text>
+
+  <rect x="45" y="375" width="230" height="155" class="box debug"/>
+  <text x="70" y="405" class="title">Debug commands</text>
+  <text x="70" y="433" class="txt">trace show</text>
+  <text x="70" y="457" class="txt">replay</text>
+  <text x="70" y="481" class="txt">vcs status</text>
+  <text x="70" y="505" class="txt">quality run and bundle</text>
+
+  <rect x="345" y="355" width="250" height="195" class="box debug"/>
+  <text x="370" y="385" class="title">Debug bundle</text>
+  <text x="370" y="413" class="txt">redacted traces and prompts</text>
+  <text x="370" y="437" class="txt">outputs and command logs</text>
+  <text x="370" y="461" class="txt">memory samples and pids</text>
+  <text x="370" y="485" class="txt">GitHub payload summaries</text>
+  <text x="370" y="509" class="txt">VCS metadata and diff</text>
+
+  <rect x="675" y="355" width="210" height="195" class="box store"/>
+  <text x="700" y="385" class="title">Trace span tree</text>
+  <text x="700" y="413" class="txt">issue_run</text>
+  <text x="720" y="437" class="txt">github.claim</text>
+  <text x="720" y="461" class="txt">workspace.prepare</text>
+  <text x="720" y="485" class="txt">codex.turn</text>
+  <text x="720" y="509" class="txt">quality and finalize</text>
+
+  <rect x="955" y="375" width="160" height="155" class="box check"/>
+  <text x="980" y="405" class="title">Forensics</text>
+  <text x="980" y="433" class="txt">failure chain</text>
+  <text x="980" y="457" class="txt">last event per agent</text>
+  <text x="980" y="481" class="txt">quality evidence</text>
+  <text x="980" y="505" class="txt">merge risk</text>
+
+  <path d="M275 152 L345 152" class="line"/>
+  <path d="M595 152 L675 152" class="line"/>
+  <path d="M885 152 L955 152" class="replay"/>
+  <path d="M1035 235 C1035 310, 980 335, 885 397" class="replay"/>
+  <path d="M675 452 L595 452" class="line"/>
+  <path d="M345 452 L275 452" class="line"/>
+  <path d="M885 452 L955 452" class="line"/>
+</svg>

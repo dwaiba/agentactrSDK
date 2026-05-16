@@ -1,0 +1,94 @@
+name: Security
+
+on:
+  pull_request:
+    branches:
+      - main
+  merge_group:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  # schedule:
+  #   - cron: "21 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: rust
+
+      - uses: github/codeql-action/analyze@v4
+
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high
+
+  rustsec:
+    name: RustSec audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit dependencies
+        run: cargo audit
+
+  supply-chain-metadata:
+    name: Supply-chain metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Docker bases are digest-pinned and Apache-licensed
+        run: |
+          set -euo pipefail
+          for dockerfile in docker/agentactr-runtime/Dockerfile docker/agentactr-cli-static/Dockerfile; do
+            test -f "${dockerfile}"
+            ! rg -n 'UNLICENSED' "${dockerfile}"
+            rg -n 'org.opencontainers.image.licenses="Apache-2.0"' "${dockerfile}"
+            awk '/^FROM / && $2 !~ /^--/ { print FILENAME ":" FNR ":" $0 } /^FROM / && $2 ~ /^--/ { print FILENAME ":" FNR ":" $0 }' "${dockerfile}" |
+              while IFS= read -r line; do
+                case "${line}" in
+                  *" AS verify"*) continue ;;
+                  *@sha256:*) ;;
+                  *) echo "Docker FROM is not digest-pinned: ${line}" >&2; exit 1 ;;
+                esac
+              done
+          done
+
+      - name: GitHub Actions references are explicit
+        run: |
+          set -euo pipefail
+          if rg -n 'uses: [^@[:space:]]+($|[[:space:]]+#)' .github/workflows; then
+            echo "Every external action reference must include an explicit ref." >&2
+            exit 1
+          fi

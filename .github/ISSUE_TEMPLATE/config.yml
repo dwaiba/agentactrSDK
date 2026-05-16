@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/dwaiba/agentactrSDK/security/policy
+    about: Please report security issues privately instead of opening a public issue.
+  - name: Usage questions
+    url: https://github.com/dwaiba/agentactrSDK/discussions
+    about: Use Discussions for setup questions, design discussion, and support requests.

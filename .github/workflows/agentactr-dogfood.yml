@@ -1,0 +1,63 @@
+name: Agentactr Dogfood
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: GitHub repository in OWNER/REPO form
+        required: true
+        default: dwaiba/agentactrSDK
+      issue:
+        description: Numeric GitHub issue id
+        required: true
+      dry_run:
+        description: Run preflight only
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run-issue:
+    name: Run agentactr issue workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build agentactr
+        run: cargo build --bin agentactr
+
+      - name: Run issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.AGENTACTR_GITHUB_TOKEN || github.token }}
+          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+        run: |
+          set -euo pipefail
+          args=(run issue --repo "${{ inputs.repo }}" --issue "${{ inputs.issue }}" --github-finalization disabled)
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          cargo run --bin agentactr -- "${args[@]}"
+
+      - name: Upload agentactr artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: agentactr-dogfood-artifacts
+          path: |
+            .agentactr/artifacts
+            .agentactr/debug
+            .agentactr/runs
+          if-no-files-found: ignore

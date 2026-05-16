@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="640" viewBox="0 0 1160 640" role="img" aria-label="Linux userspace memory management">
+  <style>
+    .box { fill:#ffffff; stroke:#111827; stroke-width:1.5; rx:8; }
+    .core { fill:#e8f3ff; }
+    .cg { fill:#ecfdf5; }
+    .proc { fill:#fff7ed; }
+    .policy { fill:#fef2f2; }
+    .store { fill:#f8fafc; }
+    .title { font:700 15px Arial,sans-serif; fill:#111827; }
+    .txt { font:13px Arial,sans-serif; fill:#111827; }
+    .small { font:12px Arial,sans-serif; fill:#374151; }
+    .line { stroke:#374151; stroke-width:1.4; fill:none; marker-end:url(#arrow); }
+    .dashed { stroke:#6b7280; stroke-width:1.3; stroke-dasharray:7 5; fill:none; marker-end:url(#arrow); }
+  </style>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#374151"/>
+    </marker>
+  </defs>
+
+  <text x="36" y="34" class="title">Linux Userspace Memory Management</text>
+
+  <rect x="45" y="80" width="235" height="160" class="box core"/>
+  <text x="70" y="110" class="title">MemoryController port</text>
+  <text x="70" y="138" class="txt">create run group</text>
+  <text x="70" y="162" class="txt">attach root and descendants</text>
+  <text x="70" y="186" class="txt">enforce high and max</text>
+  <text x="70" y="210" class="txt">emit MemoryEvent stream</text>
+
+  <rect x="350" y="60" width="255" height="220" class="box cg"/>
+  <text x="375" y="90" class="title">cgroup v2 tree</text>
+  <text x="375" y="118" class="txt">agentactr.slice</text>
+  <text x="395" y="142" class="txt">run-RUN_ID</text>
+  <text x="415" y="166" class="txt">agent-root</text>
+  <text x="415" y="190" class="txt">agent-explorer</text>
+  <text x="415" y="214" class="txt">agent-implementer</text>
+  <text x="415" y="238" class="txt">agent-reviewer</text>
+
+  <rect x="675" y="60" width="210" height="220" class="box proc"/>
+  <text x="700" y="90" class="title">Kernel files</text>
+  <text x="700" y="118" class="txt">memory.current</text>
+  <text x="700" y="142" class="txt">memory.high</text>
+  <text x="700" y="166" class="txt">memory.max</text>
+  <text x="700" y="190" class="txt">memory.events</text>
+  <text x="700" y="214" class="txt">memory.pressure</text>
+  <text x="700" y="238" class="txt">cgroup.procs</text>
+
+  <rect x="945" y="80" width="170" height="160" class="box proc"/>
+  <text x="970" y="110" class="title">Processes</text>
+  <text x="970" y="138" class="txt">Codex root</text>
+  <text x="970" y="162" class="txt">tool commands</text>
+  <text x="970" y="186" class="txt">sub-agent turns</text>
+  <text x="970" y="210" class="small">process group cleanup</text>
+
+  <rect x="45" y="365" width="235" height="145" class="box policy"/>
+  <text x="70" y="395" class="title">Policy decisions</text>
+  <text x="70" y="423" class="txt">memory.high: compact and pause</text>
+  <text x="70" y="447" class="txt">PSI: cancel low priority</text>
+  <text x="70" y="471" class="txt">OOM: preserve bundle</text>
+  <text x="70" y="495" class="txt">max: cancel run</text>
+
+  <rect x="350" y="360" width="255" height="155" class="box core"/>
+  <text x="375" y="390" class="title">Sampler and watcher</text>
+  <text x="375" y="418" class="txt">poll memory.pressure</text>
+  <text x="375" y="442" class="txt">read events deltas</text>
+  <text x="375" y="466" class="txt">reattach child pids</text>
+  <text x="375" y="490" class="txt">classify degradation</text>
+
+  <rect x="675" y="360" width="210" height="155" class="box store"/>
+  <text x="700" y="390" class="title">Trace and artifacts</text>
+  <text x="700" y="418" class="txt">memory.* RunEvents</text>
+  <text x="700" y="442" class="txt">high-water marks</text>
+  <text x="700" y="466" class="txt">process tree</text>
+  <text x="700" y="490" class="txt">debug/RUN_ID/memory</text>
+
+  <rect x="945" y="360" width="170" height="155" class="box policy"/>
+  <text x="970" y="390" class="title">Degraded modes</text>
+  <text x="970" y="418" class="txt">observe_only</text>
+  <text x="970" y="442" class="txt">non-Linux host</text>
+  <text x="970" y="466" class="txt">missing cgroup v2</text>
+  <text x="970" y="490" class="small">never claim enforcement</text>
+
+  <path d="M280 160 L350 160" class="line"/>
+  <path d="M605 170 L675 170" class="line"/>
+  <path d="M885 170 L945 170" class="line"/>
+  <path d="M780 280 L780 360" class="line"/>
+  <path d="M605 438 L675 438" class="line"/>
+  <path d="M350 438 L280 438" class="line"/>
+  <path d="M885 438 L945 438" class="dashed"/>
+  <path d="M162 365 C150 310, 170 260, 350 230" class="dashed"/>
+</svg>

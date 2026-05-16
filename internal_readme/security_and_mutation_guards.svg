@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1060" height="430" viewBox="0 0 1060 430" role="img" aria-labelledby="title desc">
+  <title id="title">Security and mutation guards</title>
+  <desc id="desc">Present-state guardrails for MCP artifacts and GitHub issue mutations.</desc>
+  <defs>
+    <style>
+      .box { fill: #f8fafc; stroke: #334155; stroke-width: 2; rx: 8; }
+      .safe { fill: #ecfdf5; stroke: #047857; stroke-width: 2; rx: 8; }
+      .warn { fill: #fff7ed; stroke: #c2410c; stroke-width: 2; rx: 8; }
+      .text { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 15px; fill: #0f172a; }
+      .small { font-size: 13px; fill: #334155; }
+      .arrow { stroke: #475569; stroke-width: 2; marker-end: url(#arrow); fill: none; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect x="34" y="52" width="198" height="112" class="box"/>
+  <text x="58" y="86" class="text">Read-only MCP</text>
+  <text x="58" y="116" class="small">artifact.read</text>
+  <text x="58" y="138" class="small">issue.read, quality.report</text>
+  <path d="M232 108 H310" class="arrow"/>
+  <rect x="310" y="44" width="232" height="128" class="safe"/>
+  <text x="334" y="80" class="text">Run id path guard</text>
+  <text x="334" y="110" class="small">single segment only</text>
+  <text x="334" y="132" class="small">reject ../ and separators</text>
+  <path d="M542 108 H626" class="arrow"/>
+  <rect x="626" y="52" width="188" height="112" class="box"/>
+  <text x="650" y="86" class="text">Scoped artifacts</text>
+  <text x="650" y="116" class="small">run/issue-set root</text>
+  <text x="650" y="138" class="small">redacted outputs</text>
+  <rect x="34" y="256" width="198" height="112" class="box"/>
+  <text x="58" y="290" class="text">GitHub mutation</text>
+  <text x="58" y="320" class="small">SDK-owned use cases</text>
+  <text x="58" y="342" class="small">REST/GraphQL adapter</text>
+  <path d="M232 312 H310" class="arrow"/>
+  <rect x="310" y="248" width="232" height="128" class="safe"/>
+  <text x="334" y="284" class="text">Label add/remove</text>
+  <text x="334" y="314" class="small">avoid stale replacement</text>
+  <text x="334" y="336" class="small">verify final state</text>
+  <path d="M542 312 H626" class="arrow"/>
+  <rect x="626" y="248" width="258" height="128" class="warn"/>
+  <text x="650" y="284" class="text">Unsupported fields</text>
+  <text x="650" y="314" class="small">issue_field_values degraded</text>
+  <text x="650" y="336" class="small">fail before mutation</text>
+</svg>

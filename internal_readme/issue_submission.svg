@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1060" height="340" viewBox="0 0 1060 340" role="img" aria-labelledby="title desc">
+  <title id="title">Issue proposal and submission commands</title>
+  <desc id="desc">Shows find, draft, proposals, submit, mark, Codex draft/review, ledger and GitHub mutation paths.</desc>
+  <style>.box{fill:#f8fafc;stroke:#334155;stroke-width:1.4;rx:8}.safe{fill:#ecfdf5;stroke:#047857;stroke-width:1.4;rx:8}.mut{fill:#fff7ed;stroke:#c2410c;stroke-width:1.4;rx:8}.text{font-family:Arial,sans-serif;font-size:15px;fill:#0f172a}.small{font-family:Arial,sans-serif;font-size:12px;fill:#334155}.arrow{stroke:#334155;stroke-width:1.5;fill:none;marker-end:url(#arrow)}</style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/></marker></defs>
+  <rect x="35" y="60" width="150" height="85" class="box"/><text x="55" y="92" class="text">issue find</text><text x="55" y="117" class="small">GitHub read</text><text x="55" y="133" class="small">candidates</text>
+  <rect x="235" y="60" width="170" height="85" class="safe"/><text x="255" y="92" class="text">issue draft</text><text x="255" y="117" class="small">deterministic or Codex</text><text x="255" y="133" class="small">local proposals</text>
+  <rect x="455" y="60" width="170" height="85" class="safe"/><text x="475" y="92" class="text">issue proposals</text><text x="475" y="117" class="small">review local set</text><text x="475" y="133" class="small">no mutation</text>
+  <rect x="675" y="60" width="160" height="85" class="box"/><text x="695" y="92" class="text">issue mark</text><text x="695" y="117" class="small">dedupe decision</text><text x="695" y="133" class="small">local artifact</text>
+  <rect x="875" y="60" width="150" height="85" class="mut"/><text x="895" y="92" class="text">issue submit</text><text x="895" y="117" class="small">--yes required</text><text x="895" y="133" class="small">GitHub write</text>
+  <rect x="235" y="225" width="220" height="70" class="box"/><text x="255" y="254" class="text">Codex draft/review artifacts</text><text x="255" y="278" class="small">read-only sandbox, schema validation</text>
+  <rect x="585" y="225" width="220" height="70" class="box"/><text x="605" y="254" class="text">SQLite idempotency ledger</text><text x="605" y="278" class="small">pending/submitted/created/linked</text>
+  <path d="M185 103 H235" class="arrow"/><path d="M405 103 H455" class="arrow"/><path d="M625 103 H675" class="arrow"/><path d="M835 103 H875" class="arrow"/><path d="M345 145 V225" class="arrow"/><path d="M755 145 V225" class="arrow"/>
+</svg>

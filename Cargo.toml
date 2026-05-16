@@ -1,0 +1,14 @@
+[workspace]
+members = [
+  "crates/agentactr-core",
+  "crates/agentactr-sdk",
+  "crates/agentactr-execution",
+  "crates/agentactr-codex",
+  "crates/agentactr-cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+version = "0.1.0"

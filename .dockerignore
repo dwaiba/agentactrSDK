@@ -1,0 +1,21 @@
+# Build outputs and local runtime state
+target/
+.agentactr/
+**/.agentactr/
+
+# VCS and editor state
+.git/
+.gitignore
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local logs and bundles
+*.log
+*.tmp
+*.bak
+internal_specs_agentactrSDK/**/*.png
+
+# Keep source, specs, and image assets in the Docker context.

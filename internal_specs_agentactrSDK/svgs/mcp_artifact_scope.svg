@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="360" viewBox="0 0 980 360" role="img" aria-labelledby="title desc">
+  <title id="title">MCP artifact scope guard</title>
+  <desc id="desc">Read-only MCP artifact requests validate run identifiers before joining the artifact root.</desc>
+  <defs>
+    <style>
+      .box { fill: #f8fafc; stroke: #334155; stroke-width: 2; rx: 8; }
+      .guard { fill: #ecfdf5; stroke: #047857; stroke-width: 2; rx: 8; }
+      .deny { fill: #fff1f2; stroke: #be123c; stroke-width: 2; rx: 8; }
+      .text { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 15px; fill: #0f172a; }
+      .small { font-size: 13px; fill: #334155; }
+      .arrow { stroke: #475569; stroke-width: 2; marker-end: url(#arrow); fill: none; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect x="32" y="56" width="180" height="88" class="box"/>
+  <text x="52" y="88" class="text">MCP tool call</text>
+  <text x="52" y="116" class="small">artifact.read</text>
+  <text x="52" y="136" class="small">optional run_id</text>
+  <path d="M212 100 H292" class="arrow"/>
+  <rect x="292" y="48" width="218" height="104" class="guard"/>
+  <text x="314" y="80" class="text">Validate run_id segment</text>
+  <text x="314" y="108" class="small">no path separators</text>
+  <text x="314" y="128" class="small">no relative or empty segment</text>
+  <path d="M510 86 H596" class="arrow"/>
+  <rect x="596" y="40" width="184" height="92" class="box"/>
+  <text x="616" y="72" class="text">Join artifact root</text>
+  <text x="616" y="100" class="small">.agentactr/artifacts/RUN_ID</text>
+  <path d="M780 86 H858" class="arrow"/>
+  <rect x="858" y="48" width="90" height="76" class="box"/>
+  <text x="878" y="82" class="text">Read</text>
+  <text x="878" y="106" class="small">scoped</text>
+  <path d="M401 152 V236" class="arrow"/>
+  <rect x="274" y="236" width="254" height="84" class="deny"/>
+  <text x="296" y="268" class="text">Reject invalid run_id</text>
+  <text x="296" y="296" class="small">tool error, no filesystem join</text>
+  <rect x="594" y="210" width="294" height="110" class="box"/>
+  <text x="616" y="244" class="text">Explicit env scope</text>
+  <text x="616" y="272" class="small">AGENTACTR_ARTIFACT_ROOT</text>
+  <text x="616" y="294" class="small">AGENTACTR_RUN_ID, TRACE_PATH</text>
+</svg>

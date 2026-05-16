@@ -1,0 +1,95 @@
+name: Nightly
+
+on:
+  # schedule:
+  #   - cron: "37 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deep-rust:
+    name: Deep Rust validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install extended Rust tooling
+        run: |
+          cargo install cargo-nextest --locked
+          cargo install cargo-deny --locked
+          cargo install cargo-machete --locked
+
+      - name: Nextest
+        run: cargo nextest run --workspace --all-features
+
+      - name: Cargo deny
+        run: cargo deny check
+
+      - name: Cargo machete
+        run: cargo machete
+
+  docker-smoke:
+    name: Runtime image smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: depot/setup-action@v1
+
+      - name: Check Depot configuration
+        env:
+          DEPOT_PROJECT_ID: ${{ vars.DEPOT_PROJECT_ID }}
+          DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${DEPOT_PROJECT_ID}" || { echo "DEPOT_PROJECT_ID repository/action variable is required" >&2; exit 1; }
+          test -n "${DEPOT_TOKEN}" || { echo "DEPOT_TOKEN action secret is required" >&2; exit 1; }
+
+      - name: Build runtime image with Depot
+        id: runtime-image
+        uses: depot/build-push-action@v1
+        with:
+          project: ${{ vars.DEPOT_PROJECT_ID }}
+          token: ${{ secrets.DEPOT_TOKEN }}
+          context: .
+          file: docker/agentactr-runtime/Dockerfile
+          platforms: linux/arm64
+          load: true
+          tags: |
+            ghcr.io/dwaiba/agentactr-runtime:0.1.0-linux-arm64
+            ghcr.io/dwaiba/agentactr-runtime:latest-linux-arm64
+          build-args: |
+            AGENTACTR_VERSION=0.1.0
+          sbom: true
+          provenance: mode=max
+
+      - name: Build static CLI image with Depot
+        id: cli-image
+        uses: depot/build-push-action@v1
+        with:
+          project: ${{ vars.DEPOT_PROJECT_ID }}
+          token: ${{ secrets.DEPOT_TOKEN }}
+          context: .
+          file: docker/agentactr-cli-static/Dockerfile
+          platforms: linux/arm64
+          load: true
+          tags: |
+            ghcr.io/dwaiba/agentactr-cli:0.1.0-linux-arm64-musl
+            ghcr.io/dwaiba/agentactr-cli:latest-linux-arm64-musl
+          build-args: |
+            AGENTACTR_VERSION=0.1.0
+          sbom: true
+          provenance: mode=max
+
+      - name: Smoke images
+        run: VERSION=0.1.0 scripts/verify-agentactr-images.sh

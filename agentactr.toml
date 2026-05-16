@@ -1,0 +1,249 @@
+[tracker]
+kind = "github" # possible values: github
+repo = "dwaiba/agentactrSDK"
+token_env = "GITHUB_TOKEN"
+github_api_version = "2026-03-10"
+active_labels = ["agentactr:ready"]
+ignore_labels = ["agentactr:blocked"]
+claim_label = "agentactr:claimed"
+running_label = "agentactr:running"
+failed_label = "agentactr:failed"
+done_label = "agentactr:done"
+
+[codex]
+command = "codex"
+mode = "cli_json" # possible values: cli_json, app_server, codex_sdk
+profile = "agentactr"
+approval_policy = "never" # possible values: never, on-request
+sandbox_mode = "workspace-write" # possible values: read-only, workspace-write, danger-full-access
+network = "off" # possible values: off, on
+default_model = "configured-by-codex"
+model_reasoning_effort = "medium" # possible values: minimal, low, medium, high, xhigh
+auth_mode = "auto" # possible values: auto, chatgpt, api_key
+openai_api_key_env = "CODEX_API_KEY"
+app_server_transport = "stdio" # possible values: stdio, websocket
+app_server_experimental_api = false # possible values: true, false
+sdk_bridge = "typescript" # possible values: typescript
+fallback_mode = "cli_json" # possible values: cli_json
+
+[human_intervention]
+mode = "fail_closed" # possible values: fail_closed, interactive, review_required
+on_codex_approval_request = "fail_run" # possible values: fail_run, prompt_operator
+on_ambiguous_diff = "fail_quality_gate" # possible values: fail_quality_gate, prompt_operator
+on_review_disagreement = "fail_quality_gate" # possible values: fail_quality_gate, prompt_operator
+on_missing_codex_auth = "fail_startup" # possible values: fail_startup, prompt_operator
+on_missing_github_token = "fail_startup" # possible values: fail_startup, prompt_operator
+run_start_banner = true # possible values: true, false
+print_override_steps = true # possible values: true, false
+
+[github]
+finalization = "require_human_review" # possible values: automatic_after_quality_gates, require_human_review, disabled
+standard_label_policy = "ensure_on_issue_create" # possible values: ensure_on_issue_create, disabled
+project_automation = "disabled" # possible values: disabled, ensure_on_issue_create
+project_owner = "auto"
+project_number = 0
+project_title = "Agentactr"
+project_priority_field = "Priority"
+project_size_field = "Size"
+
+[mcp]
+default_policy = "auto_setup_detected_credentials" # possible values: auto_setup_detected_credentials, disabled
+remote_research_servers = "auto_enable_when_credentials_detected" # possible values: auto_enable_when_credentials_detected, disabled
+remote_github_read_tools = "auto_enable_when_token_detected" # possible values: auto_enable_when_token_detected, disabled
+remote_github_write_tools = "disabled_by_default" # possible values: disabled_by_default, explicit_only
+openai_developer_docs = "auto_enable_no_auth" # possible values: auto_enable_no_auth, disabled
+google_developer_api = "auto_enable_with_GOOGLE_API_KEY" # possible values: auto_enable_with_GOOGLE_API_KEY, disabled
+huggingface = "auto_enable_with_oauth_or_HF_TOKEN" # possible values: auto_enable_with_oauth_or_HF_TOKEN, disabled
+github_remote = "auto_enable_read_only_with_token" # possible values: auto_enable_read_only_with_token, disabled
+fail_on_required_mcp_missing = true # possible values: true, false
+
+[repository]
+empty_repo_policy = "fail_closed_unless_stack_declared" # possible values: fail_closed_unless_stack_declared, allow_empty
+declared_primary_stack = "auto" # possible values: auto, rust, typescript, golang, python
+allowed_bootstrap = "explicit_only" # possible values: explicit_only, disabled
+bootstrap_prereqs = "minimal_for_declared_stack" # possible values: minimal_for_declared_stack, none
+fail_on_low_confidence_stack_detection = true # possible values: true, false
+
+[vcs]
+kind = "git" # possible values: git
+workspace_strategy = "worktree" # possible values: worktree
+base_ref = "origin/main"
+worktree_root = ".agentactr/worktrees"
+branch_template = "agentactr/{repo_slug}/issue-{issue_number}/{run_id}"
+record_base_commit = true # possible values: true, false
+fail_on_dirty_source_checkout = true # possible values: true, false
+copy_runtime_config_to_worktree = true # possible values: true, false
+detect_cross_issue_file_overlap = true # possible values: true, false
+overlap_policy = "fail_closed" # possible values: fail_closed, warn, disabled
+
+[quality]
+profile = "strict" # possible values: strict, standard, minimal
+pre_commit_mode = "required" # possible values: required, disabled
+technology_detection = "auto" # possible values: auto, declared_only
+domains = ["auto"] # possible values: auto, language, iac, database, streaming, storage, communications, observability, security, resilience, tenancy, service_patterns, api_contracts.protobuf, rpc.grpc
+domain_gate_opt_ins = [] # possible values: domain id, gate name, domain:gate, domain:*, all
+run_existing_pre_commit_config = true # possible values: true, false
+fail_on_missing_toolchain = true # possible values: true, false
+fail_on_untracked_generated_files = true # possible values: true, false
+allow_test_omission_reason = true # possible values: true, false
+artifact_dir = ".agentactr/artifacts/quality"
+dependency_checks = true # possible values: true, false
+architecture_checks = true # possible values: true, false
+tool_pinning = "required_for_strict" # possible values: required_for_strict, optional, disabled
+
+[quality.typescript]
+enabled = "auto" # possible values: auto, true, false
+package_manager = "auto" # possible values: auto, npm, pnpm, yarn, bun
+install = "frozen" # possible values: frozen, skip
+node_version = "nvmrc_or_node_version_required"
+bun = "pinned_when_used"
+biome = "pinned_when_used_or_config_present"
+zod = "required_for_new_boundary_validation"
+framework_detection = ["vite", "next", "remix", "sveltekit", "astro"]
+commands = ["install", "biome", "lint", "typecheck", "test", "build", "framework_smoke"]
+run_only_existing_scripts = true # possible values: true, false
+
+[quality.rust]
+enabled = "auto" # possible values: auto, true, false
+commands = [
+  "cargo fmt --all -- --check",
+  "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+  "cargo nextest run --workspace --all-features",
+  "cargo test --doc --workspace --all-features",
+  "cargo deny check",
+  "cargo machete"
+]
+public_library_extra = ["cargo semver-checks"]
+unsafe_parser_network_input_heavy_extra = ["cargo miri test", "cargo fuzz run"]
+
+[quality.golang]
+enabled = "auto" # possible values: auto, true, false
+golangci_lint = "pinned_required"
+module_files = "go_mod_and_go_sum_required"
+commands = [
+  "gofmt-check",
+  "go mod verify",
+  "go mod tidy-check",
+  "go vet ./...",
+  "golangci-lint run",
+  "govulncheck ./...",
+  "go test ./..."
+]
+architecture_checks = ["golangci-lint-depguard", "import-boundary-check", "package-cycle-check"]
+
+[quality.python]
+enabled = "auto" # possible values: auto, true, false
+package_manager = "uv_preferred"
+python_version = "requires_pin"
+dependency_lock = "required"
+commands = [
+  "uv sync --frozen",
+  "uv run ruff format --check .",
+  "uv run ruff check .",
+  "uv run pyright",
+  "uv run pytest",
+  "uv run pip-audit",
+  "uv run deptry ."
+]
+optional_commands = [
+  "uv run mypy",
+  "uv run coverage run -m pytest",
+  "uv run coverage report --fail-under CONFIGURED_THRESHOLD",
+  "uv run bandit -r .",
+  "uv run interrogate ."
+]
+library_extra = ["uv build", "uv run twine check dist/*"]
+service_extra = ["contract-tests", "openapi-schema-check-if_present"]
+parser_network_input_heavy_extra = ["uv run bandit -r .", "uv run semgrep --config auto", "uv run pytest --hypothesis-profile ci"]
+architecture_checks = ["import-linter-if_config_present", "layer-boundary-review"]
+
+[architecture]
+domains = ["auto"] # possible values: auto, detected_only, declared_only
+domain_graph_artifact = ".agentactr/artifacts/domain_graph.json"
+fail_on_domain_drift = true # possible values: true, false
+
+[templates]
+enabled_domains = ["auto"] # possible values: auto, detected_only, declared_only
+framework_profile = "auto" # possible values: auto, nextjs, none
+agents_policy = "generate_when_absent" # possible values: generate_when_absent, artifact_only, disabled
+
+[commit]
+mode = "local_after_quality_gates" # possible values: local_after_quality_gates, disabled
+signoff = false # possible values: true, false
+gpg_sign = "inherit" # possible values: inherit, true, false
+message_template = "agentactr: fix {tracker_ref}"
+required_trailers = ["Agentactr-Run-Id", "Tracker-Ref", "Base-Commit", "Policy"]
+
+[merge]
+mode = "disabled" # possible values: disabled, local, pull_request
+push = "disabled" # possible values: disabled, enabled
+strategy = "fast_forward_only" # possible values: fast_forward_only
+require_clean_rebase = true # possible values: true, false
+require_no_cross_issue_overlap = true # possible values: true, false
+require_human_review_for_merge = true # possible values: true, false
+
+[workspace]
+root = ".agentactr/workspaces"
+keep_successful = true # possible values: true, false
+keep_failed = true # possible values: true, false
+
+[scheduling]
+poll_interval_ms = 30000
+max_concurrent_issue_runs = 3
+lease_ttl_ms = 300000
+max_retries = 5
+
+[spawn]
+enabled = true # possible values: true, false
+max_child_agents_per_issue = 4
+max_spawn_depth = 1
+allow_parallel_read_only = true # possible values: true, false
+allow_parallel_writers = false # possible values: true, false
+strategy = "budget_aware_one_writer" # possible values: budget_aware_one_writer
+max_total_uncached_input_tokens = 250000
+max_child_uncached_input_tokens = 80000
+max_child_output_tokens = 12000
+artifact_handoff = "refs_summaries_and_digests" # possible values: refs_summaries_and_digests
+pause_on_memory_pressure = true # possible values: true, false
+
+[execution]
+backend = "auto" # possible values: auto, native_linux_cgroup_v2, docker_linux_vm, native_macos_observe_only, observe_only
+strict_memory_required = true # possible values: true, false
+
+[execution.docker]
+command = "docker"
+image = "ghcr.io/dwaiba/agentactr-runtime:0.1.0-linux-arm64"
+pull_policy = "if_missing" # possible values: if_missing, always, never
+network = "bridge" # possible values: bridge, none, host
+workspace_mount = "rw" # possible values: rw, ro
+artifact_mount = "rw" # possible values: rw, ro
+remove_containers = true # possible values: true, false
+container_prefix = "agentactr"
+
+[linux_memory]
+enabled = true # possible values: true, false
+cgroup_root = "auto" # possible values: auto, absolute cgroup v2 path
+root_group = "agentactr"
+mode = "enforce_on_linux_observe_elsewhere" # possible values: enforce_on_linux_observe_elsewhere, observe_only
+cgroup_v2_required = true # possible values: true, false
+psi_required = true # possible values: true, false
+per_issue_memory_high = "6G"
+per_issue_memory_max = "8G"
+per_agent_memory_high = "3G"
+per_agent_memory_max = "4G"
+psi_memory_some_threshold_us = 150000
+psi_memory_window_us = 1000000
+oom_score_adj = 300
+setrlimit_address_space = "disabled" # possible values: disabled, memory size such as 4G
+setrlimit_file_size = "disabled" # possible values: disabled, memory size such as 1G
+kill_policy = "cancel_lowest_priority_subagent" # possible values: cancel_lowest_priority_subagent, fail_run, observe
+oom_policy = "fail_run_preserve_debug_bundle" # possible values: fail_run_preserve_debug_bundle, fail_agent, observe
+
+[observability]
+jsonl = ".agentactr/runs/events.jsonl"
+sqlite = ".agentactr/runs/agentactr.sqlite"
+artifact_root = ".agentactr/artifacts"
+otel_enabled = false # possible values: true, false
+otel_endpoint = "http://localhost:4317"
+debug_bundle_root = ".agentactr/debug"
+redact_secrets = true # possible values: true, false

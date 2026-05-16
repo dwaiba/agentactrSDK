@@ -1,0 +1,77 @@
+minimum_pre_commit_version: "3.7.0"
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all -- --check
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: generated-cli-docs
+        name: generated CLI docs are current
+        entry: bash -c 'cargo run --bin agentactr -- docs cli-markdown | cmp -s docs/cli/reference.md -'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: architecture-boundaries
+        name: architecture boundaries
+        entry: scripts/check-architecture-boundaries.sh
+        language: script
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: docker-release-metadata
+        name: Docker release metadata
+        entry: scripts/check-docker-release-metadata.sh
+        language: script
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: github-workflow-gates
+        name: GitHub workflow merge gates
+        entry: scripts/check-github-workflow-gates.sh
+        language: script
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: cargo-check
+        name: cargo check
+        entry: cargo check --workspace --all-features
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --workspace --all-features
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      - id: cargo-doc-test
+        name: cargo doc tests
+        entry: cargo test --doc --workspace --all-features
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

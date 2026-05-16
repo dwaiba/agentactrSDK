@@ -1,0 +1,20 @@
+name: Question
+description: Ask a usage or design question.
+title: "question: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please prefer GitHub Discussions for broad support. Use this form only when the question may uncover a documentation or product gap.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Include platform, command, and redacted config details where relevant.

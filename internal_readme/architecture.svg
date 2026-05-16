@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="560" viewBox="0 0 1180 560" role="img" aria-labelledby="title desc">
+  <title id="title">Present repository architecture</title>
+  <desc id="desc">Shows core contracts, SDK use cases, adapter crates, execution backend wrapping, and CLI product wiring.</desc>
+  <style>
+    .core { fill:#eff6ff; stroke:#1d4ed8; stroke-width:1.5; rx:8; }
+    .sdk { fill:#ecfdf5; stroke:#047857; stroke-width:1.5; rx:8; }
+    .adapter { fill:#fff7ed; stroke:#c2410c; stroke-width:1.5; rx:8; }
+    .cli { fill:#f8fafc; stroke:#334155; stroke-width:1.5; rx:8; }
+    .text { font-family:Arial, sans-serif; font-size:15px; fill:#0f172a; }
+    .small { font-family:Arial, sans-serif; font-size:12px; fill:#334155; }
+    .arrow { stroke:#334155; stroke-width:1.5; fill:none; marker-end:url(#arrow); }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+  </defs>
+
+  <rect x="40" y="50" width="230" height="122" class="core"/>
+  <text x="62" y="82" class="text">agentactr-core</text>
+  <text x="62" y="108" class="small">provider-neutral ports</text>
+  <text x="62" y="124" class="small">typed config and policies</text>
+  <text x="62" y="140" class="small">spawn, memory, issue contracts</text>
+  <text x="62" y="156" class="small">no transport or adapter imports</text>
+
+  <rect x="330" y="50" width="250" height="122" class="sdk"/>
+  <text x="352" y="82" class="text">agentactr-sdk</text>
+  <text x="352" y="108" class="small">use cases and planners</text>
+  <text x="352" y="124" class="small">repository and domain graph</text>
+  <text x="352" y="140" class="small">issue planners and renderers</text>
+  <text x="352" y="156" class="small">RunResourceGovernor facade</text>
+
+  <rect x="640" y="50" width="220" height="122" class="adapter"/>
+  <text x="662" y="82" class="text">agentactr-codex</text>
+  <text x="662" y="108" class="small">cli_json runtime adapter</text>
+  <text x="662" y="124" class="small">run-scoped CODEX_HOME</text>
+  <text x="662" y="140" class="small">app_server/codex_sdk stubs</text>
+  <text x="662" y="156" class="small">runtime process attribution</text>
+
+  <rect x="920" y="50" width="220" height="122" class="adapter"/>
+  <text x="942" y="82" class="text">agentactr-execution</text>
+  <text x="942" y="108" class="small">execution backend resolver</text>
+  <text x="942" y="124" class="small">Docker command wrapper</text>
+  <text x="942" y="140" class="small">provider-neutral process spec</text>
+  <text x="942" y="156" class="small">image pull policy helpers</text>
+
+  <rect x="640" y="250" width="230" height="122" class="cli"/>
+  <text x="662" y="282" class="text">agentactr CLI</text>
+  <text x="662" y="308" class="small">command surface and docs</text>
+  <text x="662" y="324" class="small">config-driven composition</text>
+  <text x="662" y="340" class="small">Codex/GitHub/default wiring</text>
+  <text x="662" y="356" class="small">doctor, templates, gates</text>
+
+  <rect x="330" y="250" width="250" height="122" class="adapter"/>
+  <text x="352" y="282" class="text">CLI-local adapters</text>
+  <text x="352" y="308" class="small">GitHub REST/GraphQL</text>
+  <text x="352" y="324" class="small">local Git worktrees</text>
+  <text x="352" y="340" class="small">SQLite and JSONL artifacts</text>
+  <text x="352" y="356" class="small">quality-gate commands</text>
+
+  <rect x="920" y="250" width="220" height="122" class="adapter"/>
+  <text x="942" y="282" class="text">Linux memory</text>
+  <text x="942" y="308" class="small">cgroup v2 membership</text>
+  <text x="942" y="324" class="small">PSI memory sampling</text>
+  <text x="942" y="340" class="small">setrlimit launch limits</text>
+  <text x="942" y="356" class="small">debug bundle evidence</text>
+
+  <rect x="40" y="420" width="1100" height="90" class="sdk"/>
+  <text x="62" y="452" class="text">Synchronized documentation and gates</text>
+  <text x="62" y="478" class="small">AGENTS.md defines SOLID rules; specs_agentactrSDK.md is the architectural source of truth.</text>
+  <text x="62" y="494" class="small">README.md embeds this internal_readme/architecture.svg; architecture.yml and pre-commit delegate to scripts/check-architecture-boundaries.sh.</text>
+
+  <path d="M270 111 H330" class="arrow"/>
+  <path d="M580 111 H640" class="arrow"/>
+  <path d="M860 111 H920" class="arrow"/>
+  <path d="M750 172 V250" class="arrow"/>
+  <path d="M1030 172 V250" class="arrow"/>
+  <path d="M640 311 H580" class="arrow"/>
+  <path d="M870 311 H920" class="arrow"/>
+  <path d="M455 172 V250" class="arrow"/>
+</svg>

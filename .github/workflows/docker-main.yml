@@ -1,0 +1,51 @@
+name: Docker Main
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dockerfile-checks:
+    name: Depot Dockerfile checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: depot/setup-action@v1
+
+      - name: Check Depot configuration
+        env:
+          DEPOT_PROJECT_ID: ${{ vars.DEPOT_PROJECT_ID }}
+          DEPOT_TOKEN: ${{ secrets.DEPOT_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${DEPOT_PROJECT_ID}" || { echo "DEPOT_PROJECT_ID repository/action variable is required" >&2; exit 1; }
+          test -n "${DEPOT_TOKEN}" || { echo "DEPOT_TOKEN action secret is required" >&2; exit 1; }
+
+      - name: Check runtime Dockerfile with Depot
+        uses: depot/build-push-action@v1
+        with:
+          project: ${{ vars.DEPOT_PROJECT_ID }}
+          token: ${{ secrets.DEPOT_TOKEN }}
+          context: .
+          file: docker/agentactr-runtime/Dockerfile
+          platforms: linux/arm64
+          call: check
+
+      - name: Check static CLI Dockerfile with Depot
+        uses: depot/build-push-action@v1
+        with:
+          project: ${{ vars.DEPOT_PROJECT_ID }}
+          token: ${{ secrets.DEPOT_TOKEN }}
+          context: .
+          file: docker/agentactr-cli-static/Dockerfile
+          platforms: linux/arm64
+          call: check

@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1060" height="420" viewBox="0 0 1060 420" role="img" aria-labelledby="title desc">
+  <title id="title">GitHub lifecycle mutation safety</title>
+  <desc id="desc">SDK finalization uses typed decisions and adapter mutations that avoid stale label replacement.</desc>
+  <defs>
+    <style>
+      .box { fill: #f8fafc; stroke: #334155; stroke-width: 2; rx: 8; }
+      .sdk { fill: #eff6ff; stroke: #1d4ed8; stroke-width: 2; rx: 8; }
+      .safe { fill: #ecfdf5; stroke: #047857; stroke-width: 2; rx: 8; }
+      .deny { fill: #fff1f2; stroke: #be123c; stroke-width: 2; rx: 8; }
+      .text { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 15px; fill: #0f172a; }
+      .small { font-size: 13px; fill: #334155; }
+      .arrow { stroke: #475569; stroke-width: 2; marker-end: url(#arrow); fill: none; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect x="30" y="54" width="184" height="96" class="box"/>
+  <text x="52" y="88" class="text">Run summaries</text>
+  <text x="52" y="116" class="small">quality + outcome</text>
+  <text x="52" y="136" class="small">provider-neutral</text>
+  <path d="M214 102 H292" class="arrow"/>
+  <rect x="292" y="42" width="228" height="120" class="sdk"/>
+  <text x="314" y="78" class="text">SDK finalization use case</text>
+  <text x="314" y="108" class="small">policy, idempotency, markers</text>
+  <text x="314" y="130" class="small">typed mutation intent</text>
+  <path d="M520 102 H606" class="arrow"/>
+  <rect x="606" y="42" width="216" height="120" class="safe"/>
+  <text x="628" y="76" class="text">GitHub adapter</text>
+  <text x="628" y="106" class="small">add labels endpoint</text>
+  <text x="628" y="128" class="small">remove labels endpoint</text>
+  <path d="M822 102 H904" class="arrow"/>
+  <rect x="904" y="54" width="126" height="96" class="box"/>
+  <text x="926" y="88" class="text">Verify</text>
+  <text x="926" y="116" class="small">labels</text>
+  <text x="926" y="136" class="small">state/comment</text>
+  <rect x="270" y="236" width="278" height="118" class="deny"/>
+  <text x="294" y="272" class="text">Unsupported metadata</text>
+  <text x="294" y="302" class="small">issue_field_values degraded</text>
+  <text x="294" y="324" class="small">fail closed before mutation</text>
+  <path d="M406 162 V236" class="arrow"/>
+  <rect x="606" y="236" width="318" height="118" class="safe"/>
+  <text x="630" y="272" class="text">No stale full label replacement</text>
+  <text x="630" y="302" class="small">preserve unrelated concurrent labels</text>
+  <text x="630" y="324" class="small">record request/response artifacts</text>
+  <path d="M714 162 V236" class="arrow"/>
+</svg>

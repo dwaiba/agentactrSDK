@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="360" viewBox="0 0 1080 360" role="img" aria-labelledby="title desc">
+  <title id="title">Proactive Linux memory governance</title>
+  <desc id="desc">Shows primitive memory controller sampling feeding SDK governor decisions and supervised cancellation.</desc>
+  <style>.box{fill:#f8fafc;stroke:#334155;stroke-width:1.4;rx:8}.safe{fill:#ecfdf5;stroke:#047857;stroke-width:1.4;rx:8}.mut{fill:#fff7ed;stroke:#c2410c;stroke-width:1.4;rx:8}.text{font-family:Arial,sans-serif;font-size:15px;fill:#0f172a}.small{font-family:Arial,sans-serif;font-size:12px;fill:#334155}.arrow{stroke:#334155;stroke-width:1.5;fill:none;marker-end:url(#arrow)}</style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/></marker></defs>
+  <rect x="40" y="55" width="210" height="100" class="box"/><text x="60" y="88" class="text">LinuxMemoryController</text><text x="60" y="113" class="small">create/attach/sample</text><text x="60" y="129" class="small">reclaim/kill/finalize</text><text x="60" y="145" class="small">no orchestration policy</text>
+  <rect x="315" y="55" width="210" height="100" class="safe"/><text x="335" y="88" class="text">RunResourceGovernor</text><text x="335" y="113" class="small">pressure state machine</text><text x="335" y="129" class="small">spawn pause/release</text><text x="335" y="145" class="small">helper victim decision</text>
+  <rect x="590" y="55" width="210" height="100" class="mut"/><text x="610" y="88" class="text">Process supervisor</text><text x="610" y="113" class="small">runtime cancel if possible</text><text x="610" y="129" class="small">SIGTERM then SIGKILL</text><text x="610" y="145" class="small">cgroup.kill last</text>
+  <rect x="855" y="55" width="180" height="100" class="box"/><text x="875" y="88" class="text">debug evidence</text><text x="875" y="113" class="small">memory_events.jsonl</text><text x="875" y="129" class="small">trace events</text><text x="875" y="145" class="small">preserved bundles</text>
+  <rect x="315" y="230" width="210" height="70" class="box"/><text x="335" y="260" class="text">macOS behavior</text><text x="335" y="284" class="small">Docker backend is fallback/contingency</text>
+  <rect x="590" y="230" width="210" height="70" class="box"/><text x="610" y="260" class="text">local Mac note</text><text x="610" y="284" class="small">Docker increases startup/setup time</text>
+  <path d="M250 105 H315" class="arrow"/><path d="M525 105 H590" class="arrow"/><path d="M800 105 H855" class="arrow"/><path d="M420 155 V230" class="arrow"/><path d="M525 265 H590" class="arrow"/>
+</svg>

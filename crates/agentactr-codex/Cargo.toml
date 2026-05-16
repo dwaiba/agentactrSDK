@@ -1,0 +1,12 @@
+[package]
+name = "agentactr-codex"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+agentactr-execution = { path = "../agentactr-execution" }
+agentactr-sdk = { path = "../agentactr-sdk" }
+serde_json = "1"
+sha2 = "0.10"
+toml = "0.8"
