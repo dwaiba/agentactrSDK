@@ -21,6 +21,6 @@ sqlx-core = { version = "0.8", default-features = false, features = ["_rt-tokio"
 sqlx-sqlite = { version = "0.8", default-features = false, features = ["bundled", "migrate"] }
 tokio = { version = "1", default-features = false, features = ["rt"] }
 toml = "0.8"
-toml_edit = "0.22"
+toml_edit = "0.25"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
