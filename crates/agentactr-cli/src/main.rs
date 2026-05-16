@@ -7618,8 +7618,7 @@ fn read_worktree_metadata_document(worktree: &Path) -> Result<Option<toml::Value
     }
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("read worktree metadata {}: {e}", path.display()))?;
-    let parsed = content
-        .parse::<toml::Value>()
+    let parsed = parse_toml_document(&content)
         .map_err(|e| format!("parse worktree metadata {}: {e}", path.display()))?;
     Ok(Some(parsed))
 }
@@ -9185,7 +9184,7 @@ fn config_key_present(dotted_key: &str) -> bool {
     let Ok(content) = fs::read_to_string("agentactr.toml") else {
         return false;
     };
-    let Ok(parsed) = content.parse::<toml::Value>() else {
+    let Ok(parsed) = parse_toml_document(&content) else {
         return false;
     };
     toml_path(&parsed, dotted_key).is_some()
@@ -9331,7 +9330,7 @@ fn codex_config_mcp_server_enabled(path: &Path, server: &str) -> bool {
     let Ok(content) = fs::read_to_string(path) else {
         return false;
     };
-    let Ok(parsed) = content.parse::<toml::Value>() else {
+    let Ok(parsed) = parse_toml_document(&content) else {
         return false;
     };
     let Some(server_config) = toml_path(&parsed, &format!("mcp_servers.{server}")) else {
@@ -10882,8 +10881,7 @@ fn require_codex_project_config_ready(
             codex_config.display()
         )
     })?;
-    let parsed = content
-        .parse::<toml::Value>()
+    let parsed = parse_toml_document(&content)
         .map_err(|e| format!("parse {}: {e}", codex_config.display()))?;
     let has_project_defaults = parsed
         .as_table()
@@ -10943,8 +10941,7 @@ fn codex_project_trusted(worktree: &Path) -> Result<bool, String> {
             ))
         }
     };
-    let parsed = content
-        .parse::<toml::Value>()
+    let parsed = parse_toml_document(&content)
         .map_err(|e| format!("parse Codex user config {}: {e}", config_path.display()))?;
     let Some(projects) = parsed.get("projects").and_then(toml::Value::as_table) else {
         return Ok(false);
@@ -11268,9 +11265,8 @@ fn load_agentactr_config(repo_override: Option<&str>) -> Result<AgentactrConfig,
         .unwrap_or_else(|| "OWNER/REPO".to_string());
     let mut config = AgentactrConfig::strict_defaults(repo);
     if let Ok(content) = fs::read_to_string("agentactr.toml") {
-        let parsed = content
-            .parse::<toml::Value>()
-            .map_err(|e| format!("parse agentactr.toml: {e}"))?;
+        let parsed =
+            parse_toml_document(&content).map_err(|e| format!("parse agentactr.toml: {e}"))?;
         merge_config_from_toml(&mut config, &parsed)?;
         config.codex.validate_milestone_policy()?;
     }
@@ -12034,8 +12030,14 @@ fn toml_path<'a>(parsed: &'a toml::Value, dotted_key: &str) -> Option<&'a toml::
     Some(current)
 }
 
+fn parse_toml_document(content: &str) -> Result<toml::Value, String> {
+    toml::from_str::<toml::Table>(content)
+        .map(toml::Value::Table)
+        .map_err(|e| e.to_string())
+}
+
 fn find_config_value(content: &str, dotted_key: &str) -> Option<String> {
-    let parsed = content.parse::<toml::Value>().ok()?;
+    let parsed = parse_toml_document(content).ok()?;
     let current = toml_path(&parsed, dotted_key)?;
     current
         .as_str()
@@ -12059,9 +12061,7 @@ fn set_config_value(path: &str, dotted_key: &str, value: &str) -> Result<(), Str
     let value = parse_toml_edit_scalar(&value)?;
     set_toml_edit_path(&mut document, &segments, value)?;
     let updated = document.to_string();
-    let parsed = updated
-        .parse::<toml::Value>()
-        .map_err(|e| format!("parse updated {path}: {e}"))?;
+    let parsed = parse_toml_document(&updated).map_err(|e| format!("parse updated {path}: {e}"))?;
     let repo =
         find_config_value(&updated, "tracker.repo").unwrap_or_else(|| "OWNER/REPO".to_string());
     let mut config = AgentactrConfig::strict_defaults(repo);
@@ -12501,7 +12501,7 @@ enabled = false
         let project = Path::new("/tmp/agentactr.example/repo");
 
         let rendered = render_codex_project_trust("", project).unwrap();
-        let parsed = rendered.parse::<toml::Value>().unwrap();
+        let parsed = parse_toml_document(&rendered).unwrap();
 
         assert_eq!(
             parsed["projects"]["/tmp/agentactr.example/repo"]["trust_level"].as_str(),
@@ -12526,15 +12526,16 @@ enabled = false
     #[test]
     fn toml_config_merges_repository_policy() {
         let mut config = AgentactrConfig::strict_defaults("OWNER/REPO");
-        let parsed = r#"
+        let parsed = parse_toml_document(
+            r#"
 [repository]
 empty_repo_policy = "custom_empty_policy"
 declared_primary_stack = "rust"
 allowed_bootstrap = "custom_bootstrap"
 bootstrap_prereqs = "custom_prereqs"
 fail_on_low_confidence_stack_detection = false
-"#
-        .parse::<toml::Value>()
+"#,
+        )
         .unwrap();
 
         merge_config_from_toml(&mut config, &parsed).unwrap();
@@ -12549,7 +12550,8 @@ fail_on_low_confidence_stack_detection = false
     #[test]
     fn toml_config_merges_linux_memory_policy() {
         let mut config = AgentactrConfig::strict_defaults("OWNER/REPO");
-        let parsed = r#"
+        let parsed = parse_toml_document(
+            r#"
 [linux_memory]
 enabled = false
 cgroup_root = "/tmp/agentactr-cgroup-test"
@@ -12568,8 +12570,8 @@ setrlimit_address_space = "6G"
 setrlimit_file_size = "1G"
 kill_policy = "cancel_lowest_priority_subagent"
 oom_policy = "observe"
-"#
-        .parse::<toml::Value>()
+"#,
+        )
         .unwrap();
 
         merge_config_from_toml(&mut config, &parsed).unwrap();
@@ -12602,7 +12604,8 @@ oom_policy = "observe"
     #[test]
     fn toml_config_accepts_spec_linux_memory_schema() {
         let mut config = AgentactrConfig::strict_defaults("OWNER/REPO");
-        let parsed = r#"
+        let parsed = parse_toml_document(
+            r#"
 [linux_memory]
 enabled = true
 cgroup_root = "auto"
@@ -12611,8 +12614,8 @@ per_issue_memory_high = "5G"
 per_issue_memory_max = "7G"
 oom_score_adj = 300
 kill_policy = "cancel_lowest_priority_subagent"
-"#
-        .parse::<toml::Value>()
+"#,
+        )
         .unwrap();
 
         merge_config_from_toml(&mut config, &parsed).unwrap();
@@ -12636,7 +12639,8 @@ kill_policy = "cancel_lowest_priority_subagent"
     #[test]
     fn toml_config_accepts_execution_docker_backend_schema() {
         let mut config = AgentactrConfig::strict_defaults("OWNER/REPO");
-        let parsed = r#"
+        let parsed = parse_toml_document(
+            r#"
 [execution]
 backend = "docker_linux_vm"
 strict_memory_required = true
@@ -12650,8 +12654,8 @@ workspace_mount = "rw"
 artifact_mount = "rw"
 remove_containers = false
 container_prefix = "agentactr-test"
-"#
-        .parse::<toml::Value>()
+"#,
+        )
         .unwrap();
 
         merge_config_from_toml(&mut config, &parsed).unwrap();
@@ -12911,7 +12915,8 @@ container_prefix = "agentactr-test"
     #[test]
     fn toml_config_merges_rendered_policy_sections() {
         let mut config = AgentactrConfig::strict_defaults("OWNER/REPO");
-        let parsed = r#"
+        let parsed = parse_toml_document(
+            r#"
 [tracker]
 active_labels = ["ready"]
 ignore_labels = ["blocked"]
@@ -12979,8 +12984,8 @@ otel_enabled = true
 otel_endpoint = "http://127.0.0.1:4317"
 debug_bundle_root = ".custom/debug"
 redact_secrets = false
-"#
-        .parse::<toml::Value>()
+"#,
+        )
         .unwrap();
 
         merge_config_from_toml(&mut config, &parsed).unwrap();
@@ -13021,9 +13026,7 @@ redact_secrets = false
 
     #[test]
     fn checked_in_root_config_exposes_current_operator_surface() {
-        let parsed = include_str!("../../../agentactr.toml")
-            .parse::<toml::Value>()
-            .unwrap();
+        let parsed = parse_toml_document(include_str!("../../../agentactr.toml")).unwrap();
 
         assert_eq!(
             toml_path(&parsed, "spawn.strategy")
@@ -13442,14 +13445,15 @@ args = ["mcp"]
     #[test]
     fn toml_codex_milestone_policy_rejects_alias_values() {
         let mut config = AgentactrConfig::strict_defaults("OWNER/REPO");
-        let parsed = r#"
+        let parsed = parse_toml_document(
+            r#"
 [codex]
 mode = "exec-json"
 app_server_transport = "stdio"
 sdk_bridge = "typescript"
 fallback_mode = "cli_json"
-"#
-        .parse::<toml::Value>()
+"#,
+        )
         .unwrap();
 
         merge_config_from_toml(&mut config, &parsed).unwrap();

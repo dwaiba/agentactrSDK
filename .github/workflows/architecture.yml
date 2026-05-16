@@ -23,5 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: SOLID architecture contract
         run: scripts/check-architecture-boundaries.sh

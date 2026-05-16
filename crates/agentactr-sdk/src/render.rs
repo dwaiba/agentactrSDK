@@ -978,6 +978,12 @@ mod tests {
     use super::*;
     use agentactr_core::AgentactrConfig;
 
+    fn parse_toml_document(content: &str) -> Result<toml::Value, String> {
+        toml::from_str::<toml::Table>(content)
+            .map(toml::Value::Table)
+            .map_err(|e| e.to_string())
+    }
+
     #[test]
     fn agentactr_toml_renders_codex_milestone_transport_policy() {
         let config = AgentactrConfig::strict_defaults("OWNER/REPO");
@@ -1016,7 +1022,7 @@ mod tests {
             !rendered.lines().any(|line| line.starts_with('\t')),
             "rendered agentactr.toml must not indent top-level sections or keys with tabs"
         );
-        rendered.parse::<toml::Value>().unwrap();
+        parse_toml_document(&rendered).unwrap();
     }
 
     #[test]
@@ -1053,7 +1059,7 @@ mod tests {
         assert!(!rendered.contains("auto_enable_when"));
         assert!(rendered.contains("[mcp_servers.openaiDeveloperDocs]\nurl = \"https://developers.openai.com/mcp\"\nenabled = true"));
         assert!(rendered.contains("[mcp_servers.GoogleDeveloperAPI]\nurl = \"https://developerknowledge.googleapis.com/mcp\"\nenabled = false"));
-        rendered.parse::<toml::Value>().unwrap();
+        parse_toml_document(&rendered).unwrap();
     }
 
     #[test]
@@ -1062,7 +1068,7 @@ mod tests {
         config.codex.profile = "custom.profile".to_string();
         config.codex.network = "on".to_string();
         let rendered = render_codex_config_toml(&config, &DetectedCredentials::default());
-        let parsed = rendered.parse::<toml::Value>().unwrap();
+        let parsed = parse_toml_document(&rendered).unwrap();
 
         assert!(!rendered.contains("[profiles."));
         assert_eq!(

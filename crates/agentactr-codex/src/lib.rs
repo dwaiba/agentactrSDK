@@ -878,6 +878,12 @@ pub fn append_codex_project_profile_overrides(
     Ok(())
 }
 
+fn parse_toml_document(content: &str) -> Result<toml::Value, String> {
+    toml::from_str::<toml::Table>(content)
+        .map(toml::Value::Table)
+        .map_err(|e| e.to_string())
+}
+
 fn codex_project_profile_overrides(
     worktree: &Path,
     profile: &str,
@@ -885,8 +891,7 @@ fn codex_project_profile_overrides(
     let codex_config = worktree.join(".codex").join("config.toml");
     let content = fs::read_to_string(&codex_config)
         .map_err(|e| format!("read Codex project config {}: {e}", codex_config.display()))?;
-    let parsed = content
-        .parse::<toml::Value>()
+    let parsed = parse_toml_document(&content)
         .map_err(|e| format!("parse {}: {e}", codex_config.display()))?;
     let root_table = parsed.as_table().ok_or_else(|| {
         format!(
@@ -1919,7 +1924,7 @@ sandbox_mode = "workspace-write"
 
         assert_eq!(codex_home, artifact_dir.join("codex-home"));
         let content = fs::read_to_string(codex_home.join("config.toml")).unwrap();
-        let parsed = content.parse::<toml::Value>().unwrap();
+        let parsed = parse_toml_document(&content).unwrap();
         assert_eq!(
             parsed["projects"][worktree.to_string_lossy().as_ref()]["trust_level"].as_str(),
             Some("trusted")

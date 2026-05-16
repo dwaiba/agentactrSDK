@@ -112,7 +112,7 @@ jobs:
           printf '%s\n' "${CLI_METADATA}" > .agentactr/image-metadata/agentactr-cli-static.json
 
       - name: Upload image metadata
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: agentactr-image-metadata
           path: .agentactr/image-metadata

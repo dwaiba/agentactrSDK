@@ -23,7 +23,7 @@ updates:
       - github-actions
 
   - package-ecosystem: docker
-    directory: /
+    directory: /docker/agentactr-runtime
     schedule:
       interval: weekly
       day: monday
@@ -32,3 +32,16 @@ updates:
     labels:
       - dependencies
       - docker
+      - runtime-image
+
+  - package-ecosystem: docker
+    directory: /docker/agentactr-cli-static
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:45"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+      - cli-image
