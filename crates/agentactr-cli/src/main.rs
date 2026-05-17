@@ -1,50 +1,96 @@
 mod adapters;
 mod artifacts;
+mod bootstrap_project;
+mod command_catalog;
+mod debug_bundle;
+mod docs_command;
+mod issue_commands;
 mod linux_memory;
+mod mcp_command;
+mod quality_command;
+mod setup_commands;
+mod trace_command;
+mod vcs_adapter;
+mod vcs_commands;
 
 use adapters::{
     append_codex_project_profile_overrides, codex_runtime_adapter, validate_github_repo,
     validate_issue_number, CliCodexMemorySupervisor, CodexAppServerAdapter, CodexRuntimeAdapter,
-    CodexSdkAdapter, GithubRestAdapter, LocalGitAdapter,
+    CodexSdkAdapter, GithubRestAdapter,
 };
 use agentactr_execution::{resolve_execution_backend, ExecutionBackend, ExecutionBackendDecision};
 use agentactr_sdk::{
-    apply_declared_stack_to_inspection_with_config, discover_repository,
-    discover_repository_with_config, domain_findings, domain_findings_to_json,
-    domain_graph_to_json, domain_quality_plan_to_json, finalize_recorded_run_with_tracker,
-    recorded_run_lifecycle_summary, render_agentactr_toml, render_agents_md,
-    render_codex_config_toml, render_gitignore_additions, render_workflow_md, AdapterCapabilities,
+    apply_declared_stack_to_inspection_with_config, discover_repository_with_config,
+    finalize_recorded_run_with_tracker, recorded_run_lifecycle_summary, AdapterCapabilities,
     AdapterVersionReport, AgentActrBuilder, AgentActrUseCases, AgentIssueRunRequest,
-    AgentMemoryLease, AgentRuntime, AgentactrConfig, CodexAppServerTransport, CodexAuthMode,
-    CodexFallbackMode, CodexMode, CodexSdkBridge, DetectedCredentials, FinalizeDecision,
-    FsRunFinalizationArtifacts, IssueDraftPlanner, IssueFieldValue, IssueId, IssueLifecycleMode,
-    IssueLifecycleRequest, IssueProjectFieldValue, IssueProposal, IssueProposalId,
-    IssueSetArtifactContext, IssueSetSource, IssueSubmissionDecision, IssueSubmissionLedgerEntry,
-    IssueSubmissionLedgerState, IssueTracker, LifecycleLabels, MemoryLease, MergePlan,
-    MergePlanRequest, QualityGateSummary, RecordedRunFinalizationRequest, RepoInspection,
-    RunIssueHooks, RunIssuePostRuntimeContext, RunIssueRequest, RunIssueRuntimeContext,
-    RunOutcomeSummary, RuntimeApprovalPolicy, SpawnPlan, StackKind, VersionControl, WorkspaceDiff,
-    WorktreeRef, WorktreeRequest,
+    AgentMemoryLease, AgentRuntime, AgentactrConfig, CodexAuthMode, CodexMode, FinalizeDecision,
+    FsRunFinalizationArtifacts, IssueId, IssueLifecycleMode, IssueLifecycleRequest, IssueTracker,
+    LifecycleLabels, MemoryLease, MergePlan, MergePlanRequest, QualityGateSummary,
+    RecordedRunFinalizationRequest, RepoInspection, RunIssueHooks, RunIssuePostRuntimeContext,
+    RunIssueRequest, RunIssueRuntimeContext, RunOutcomeSummary, RuntimeApprovalPolicy, SpawnPlan,
+    StackKind, VersionControl, WorkspaceDiff, WorktreeRef, WorktreeRequest,
 };
-use artifacts::{sha256_hex_bytes, ArtifactIntegrityContext};
+#[cfg(test)]
+use agentactr_sdk::{
+    render_agentactr_toml, render_gitignore_additions, IssueProposal, IssueProposalId,
+    IssueSetSource, IssueSubmissionLedgerState,
+};
+use artifacts::sha256_hex_bytes;
+#[cfg(test)]
+use artifacts::ArtifactIntegrityContext;
+use bootstrap_project::{cmd_bootstrap, BOOTSTRAP_STACK_VALUES};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
+#[cfg(test)]
+use command_catalog::command_catalog;
+use command_catalog::{cmd_commands, cmd_menu};
+use debug_bundle::cmd_debug;
+use docs_command::cmd_docs;
+#[cfg(test)]
+use docs_command::{markdown_table_cell, render_cli_markdown, write_cli_markdown_output};
+use issue_commands::cmd_issue;
+#[cfg(test)]
+use issue_commands::{
+    begin_issue_submission, codex_issue_review_status_path, create_issue_set_context,
+    ensure_issue_submission_ledger_table, ledger_parent_issue_value, load_issue_submission_ledger,
+    parse_candidate_query, require_codex_review_for_proposal, with_issue_ledger_pool,
+    write_issue_set_manifest,
+};
 use linux_memory::{LinuxMemoryController, MemoryRunContext};
-use std::collections::{BTreeMap, HashMap};
+use mcp_command::{cmd_mcp, MCP_PROTOCOL_SUPPORTED};
+use quality_command::{
+    cmd_quality, quality_process_group_alive, run_quality_gates_to_report, terminate_process_group,
+};
+#[cfg(test)]
+use quality_command::{run_quality_command, write_quality_status};
+use setup_commands::{
+    cmd_auth, cmd_config, cmd_doctor, cmd_init, codex_project_trusted, detect_credentials,
+    find_config_value, print_mcp_summary, print_memory_status,
+};
+#[cfg(test)]
+use setup_commands::{
+    codex_config_mcp_server_enabled, configured_adapter_version_reports,
+    github_api_version_support, render_codex_project_trust, set_config_value,
+};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::io::{self, BufRead, Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(test)]
+use trace_command::latest_run_status;
+use trace_command::{cmd_trace, latest_run_statuses, read_trace_records};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+use vcs_adapter::LocalGitAdapter;
+#[cfg(test)]
+use vcs_commands::apply_recorded_patch;
+use vcs_commands::cmd_vcs;
 
-const MCP_PROTOCOL_LATEST: &str = "2025-11-25";
-const MCP_PROTOCOL_SUPPORTED: &[&str] = &["2025-11-25", "2024-11-05"];
 const CODEX_AUTH_VALUES: &[&str] = &["auto", "chatgpt", "api-key"];
 const AUTH_CODEX_METHOD_VALUES: &[&str] = &["chatgpt", "subscription", "api-key"];
 const HUMAN_INTERVENTION_VALUES: &[&str] = &["fail-closed", "interactive", "review-required"];
@@ -238,7 +284,7 @@ struct CliArgs {
     disable_help_subcommand = true
 )]
 #[command(about = "Run agentactr issue automation and inspect local run artifacts.")]
-struct AgentactrHelpCli {
+pub(crate) struct AgentactrHelpCli {
     #[command(subcommand)]
     command: Option<AgentactrHelpCommand>,
 }
@@ -263,6 +309,8 @@ enum AgentactrHelpCommand {
     Config(ConfigHelpCommand),
     #[command(subcommand, about = "Configure authentication for supported runtimes.")]
     Auth(AuthHelpCommand),
+    #[command(subcommand, about = "Scaffold blank projects with explicit tooling.")]
+    Bootstrap(BootstrapHelpCommand),
     #[command(subcommand, about = "Run the local MCP bridge.")]
     Mcp(McpHelpCommand),
     #[command(subcommand, about = "Run issue automation.")]
@@ -395,6 +443,31 @@ struct AuthCodexHelpArgs {
 enum McpHelpCommand {
     #[command(about = "Run the local stdio MCP bridge for run-scoped read tools.")]
     Serve,
+}
+
+#[derive(Debug, Subcommand)]
+enum BootstrapHelpCommand {
+    #[command(about = "Scaffold a blank project with stack-specific tools and starter commands.")]
+    Project(BootstrapProjectHelpArgs),
+}
+
+#[derive(Debug, Args)]
+struct BootstrapProjectHelpArgs {
+    #[arg(
+        long,
+        value_name = "python|golang|rust|typescript|pulumi|terraform|sql",
+        value_parser = static_value_parser(BOOTSTRAP_STACK_VALUES)
+    )]
+    stack: String,
+    #[arg(long, help = "Permit writing scaffold files.")]
+    yes: bool,
+    #[arg(long, help = "Overwrite existing scaffold target files.")]
+    force: bool,
+    #[arg(
+        long,
+        help = "Permit scaffolding into a non-empty directory after target-file conflict checks."
+    )]
+    allow_non_empty: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -664,6 +737,8 @@ enum VcsHelpCommand {
     Status(RunIdHelpArgs),
     #[command(about = "Record a read-only workspace diff artifact for a run.")]
     Diff(VcsDiffHelpArgs),
+    #[command(about = "Validate or apply a recorded run patch into the source checkout.")]
+    Apply(VcsApplyHelpArgs),
     #[command(about = "Create a local commit after quality gates. Milestone command.")]
     Commit(RunIdHelpArgs),
     #[command(about = "Remove retained local worktree after retention policy. Milestone command.")]
@@ -692,6 +767,32 @@ struct VcsDiffHelpArgs {
     run_id: String,
     #[arg(long, value_name = "PATH")]
     output: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct VcsApplyHelpArgs {
+    #[arg(value_name = "RUN_ID")]
+    run_id: String,
+    #[arg(
+        long,
+        conflicts_with = "yes",
+        help = "Validate that the patch applies cleanly."
+    )]
+    check: bool,
+    #[arg(
+        long,
+        conflicts_with = "check",
+        help = "Apply the patch to the current source checkout."
+    )]
+    yes: bool,
+    #[arg(
+        long = "3way",
+        visible_alias = "three-way",
+        help = "Use git apply --3way for conflict-aware application."
+    )]
+    three_way: bool,
+    #[arg(long, help = "Permit applying into a dirty source checkout.")]
+    allow_dirty: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -739,6 +840,7 @@ fn run() -> Result<(), String> {
         Some("doctor") => cmd_doctor(&mut args),
         Some("config") => cmd_config(&mut args),
         Some("auth") => cmd_auth(&mut args),
+        Some("bootstrap") => cmd_bootstrap(&args),
         Some("mcp") => cmd_mcp(&mut args),
         Some("run") => cmd_run(&mut args),
         Some("issue") => cmd_issue(&mut args),
@@ -749,10 +851,10 @@ fn run() -> Result<(), String> {
         Some("merge") => cmd_merge(&mut args),
         Some("finalize") => cmd_finalize(&mut args),
         Some("eval") => not_implemented("eval"),
-        Some("commands") => cmd_commands(&mut args),
+        Some("commands") => cmd_commands(&args),
         Some("completions") => cmd_completions(&mut args),
         Some("docs") => cmd_docs(&mut args),
-        Some("menu") => cmd_menu(&mut args),
+        Some("menu") => cmd_menu(&args),
         Some("repo") => cmd_repo(&mut args),
         Some("quality") => cmd_quality(&mut args),
         Some("vcs") => cmd_vcs(&mut args),
@@ -786,11 +888,12 @@ fn help_text() -> &'static str {
 Implemented bootstrap commands:
   --version
   commands [--json]
-  init --yes --repo OWNER/REPO [--codex-auth auto|chatgpt|api-key]
+  init --yes [--repo OWNER/REPO] [--codex-auth auto|chatgpt|api-key]
   doctor [--fix-codex-config] [--fix-agents] [--trust-codex-project]
   config get [KEY]
   config set KEY VALUE
   auth codex --method chatgpt|subscription|api-key [--api-key-env CODEX_API_KEY]
+  bootstrap project --stack python|golang|rust|typescript|pulumi|terraform|sql --yes [--force] [--allow-non-empty]
   run issue --repo OWNER/REPO --issue 123 [--human-intervention fail-closed|interactive|review-required] [--codex-approval never|on-request] [--github-finalization automatic_after_quality_gates|require_human_review|disabled] [--dry-run]
   issue find --repo OWNER/REPO [--query TEXT] [--state open|closed|all] [--limit N] [--json]
   issue draft --repo OWNER/REPO [--prompt TEXT|--prompt-file PATH] --stack STACK [--framework nextjs|none] [--codex-draft] [--codex-review] [--json]
@@ -805,6 +908,7 @@ Implemented bootstrap commands:
   vcs show RUN_ID [--json]
   vcs status RUN_ID
   vcs diff RUN_ID [--output PATH]
+  vcs apply RUN_ID --check|--yes [--3way] [--allow-dirty]
   merge plan RUN_ID [--json]
   trace list
   trace show RUN_ID
@@ -874,7 +978,7 @@ fn print_generated_help(path: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn render_generated_help(path: &[String]) -> Result<String, String> {
+pub(crate) fn render_generated_help(path: &[String]) -> Result<String, String> {
     let mut command = AgentactrHelpCli::command();
     let selected = find_generated_help_command(&mut command, path)?;
     let mut output = Vec::new();
@@ -901,457 +1005,6 @@ fn find_generated_help_command<'a>(
             .ok_or_else(|| format!("unknown help command `{segment}`"))?;
     }
     Ok(current)
-}
-
-#[derive(Clone, Copy)]
-struct CommandCatalogEntry {
-    command: &'static str,
-    status: &'static str,
-    purpose: &'static str,
-    side_effects: &'static str,
-    required_credentials: &'static [&'static str],
-    platform_constraints: &'static [&'static str],
-    sdk_use_case_owner: &'static str,
-}
-
-fn command_catalog() -> &'static [CommandCatalogEntry] {
-    &[
-        CommandCatalogEntry {
-            command: "--version",
-            status: "implemented",
-            purpose: "Print the agentactr CLI version, build Git SHA, and compile-time rustc version.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "cli_operator_version",
-        },
-        CommandCatalogEntry {
-            command: "commands [--json]",
-            status: "implemented",
-            purpose: "List CLI command inventory and implementation status.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "cli_operator_inventory",
-        },
-        CommandCatalogEntry {
-            command: "help",
-            status: "implemented",
-            purpose: "Print top-level bootstrap help.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "cli_operator_help",
-        },
-        CommandCatalogEntry {
-            command: "init --yes --repo OWNER/REPO [--codex-auth auto|chatgpt|api-key]",
-            status: "implemented",
-            purpose: "Create local agentactr, Codex, workflow, AGENTS.md when absent, and ignore configuration.",
-            side_effects: "writes_config_files",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "config_rendering",
-        },
-        CommandCatalogEntry {
-            command: "doctor [--fix-codex-config] [--fix-agents] [--trust-codex-project]",
-            status: "implemented",
-            purpose: "Inspect local config, credentials, adapters, runtime, domain graph, AGENTS policy, and platform readiness.",
-            side_effects: "read_only_or_config_fix_when_requested",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "diagnostics",
-        },
-        CommandCatalogEntry {
-            command: "config get [KEY]",
-            status: "implemented",
-            purpose: "Read effective local configuration.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "config_provider",
-        },
-        CommandCatalogEntry {
-            command: "config set KEY VALUE",
-            status: "implemented",
-            purpose: "Persist a supported local configuration value.",
-            side_effects: "writes_config_files",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "config_provider",
-        },
-        CommandCatalogEntry {
-            command: "auth codex --method chatgpt|subscription|api-key [--api-key-env CODEX_API_KEY]",
-            status: "implemented",
-            purpose: "Configure Codex authentication mode for this repository.",
-            side_effects: "writes_config_files",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "config_provider",
-        },
-        CommandCatalogEntry {
-            command: "mcp serve",
-            status: "implemented",
-            purpose: "Run the local stdio MCP bridge for run-scoped read tools.",
-            side_effects: "serves_stdio",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "mcp_bridge",
-        },
-        CommandCatalogEntry {
-            command: "run issue --repo OWNER/REPO --issue 123 [--human-intervention fail-closed|interactive|review-required] [--codex-approval never|on-request] [--github-finalization automatic_after_quality_gates|require_human_review|disabled] [--dry-run]",
-            status: "implemented",
-            purpose: "Prepare worktree, fetch issue context, run Codex, run quality gates, and apply SDK-owned tracker lifecycle policy.",
-            side_effects: "creates_worktree_artifacts_trace_sqlite_runs_runtime_and_may_mutate_tracker_lifecycle",
-            required_credentials: &["github_token", "codex_auth_or_codex_api_key"],
-            platform_constraints: &["git", "codex_cli_or_docker_backend"],
-            sdk_use_case_owner: "run_issue",
-        },
-        CommandCatalogEntry {
-            command: "issue find --repo OWNER/REPO [--query TEXT] [--state open|closed|all] [--label LABEL...] [--assignee USER|none|*] [--author USER] [--since ISO8601] [--sort created|updated|comments] [--direction asc|desc] [--page N] [--per-page N] [--limit N] [--artifact-root PATH] [--include-pull-requests] [--json]",
-            status: "implemented",
-            purpose: "Find existing tracker issues without running implementation agents or mutating GitHub.",
-            side_effects: "creates_issue_set_artifacts",
-            required_credentials: &["github_token"],
-            platform_constraints: &["github_rest"],
-            sdk_use_case_owner: "issue_discovery",
-        },
-        CommandCatalogEntry {
-            command: "issue draft --repo OWNER/REPO [--prompt TEXT|--prompt-file PATH] --stack STACK [--framework nextjs|none] [--parent ISSUE_NUMBER] [--artifact-root PATH] [--codex-draft] [--codex-review] [--json]",
-            status: "implemented",
-            purpose: "Draft local issue proposals from repo evidence, deterministic prompt policy, or read-only Codex-authored structured output, optionally running a separate Codex review before GitHub submission.",
-            side_effects: "creates_issue_set_artifacts_and_optional_codex_draft_or_review_artifacts",
-            required_credentials: &["github_token", "codex_auth_when_codex_draft_or_review_enabled"],
-            platform_constraints: &["github_rest_for_dedupe_inventory", "codex_cli_for_codex_draft_or_review"],
-            sdk_use_case_owner: "issue_drafting",
-        },
-        CommandCatalogEntry {
-            command: "issue proposals ISSUE_SET_ID",
-            status: "implemented",
-            purpose: "List issue-set proposals without mutating GitHub.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &["recorded_issue_set_or_run_artifacts"],
-            sdk_use_case_owner: "issue_submission_review",
-        },
-        CommandCatalogEntry {
-            command: "issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--resume] [--allow-possible-duplicate --reason REASON] [--require-codex-review]",
-            status: "implemented",
-            purpose: "Submit or resume one review-gated issue proposal through capability-gated tracker ports.",
-            side_effects: "writes_sqlite_and_may_mutate_tracker_when_adapter_supports_issue_create_link",
-            required_credentials: &["github_token"],
-            platform_constraints: &["recorded_issue_set_or_run_artifacts"],
-            sdk_use_case_owner: "issue_submission",
-        },
-        CommandCatalogEntry {
-            command: "issue mark ISSUE_SET_ID --proposal PROPOSAL_ID --dedupe unique|duplicate_blocked --reason REASON",
-            status: "implemented",
-            purpose: "Record a reviewed local dedupe decision for one issue proposal without mutating GitHub.",
-            side_effects: "writes_issue_set_artifacts",
-            required_credentials: &[],
-            platform_constraints: &["recorded_issue_set_or_run_artifacts"],
-            sdk_use_case_owner: "issue_dedupe_review",
-        },
-        CommandCatalogEntry {
-            command: "repo inspect",
-            status: "implemented",
-            purpose: "Inspect repository stack and quality plan.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "repository_discovery",
-        },
-        CommandCatalogEntry {
-            command: "quality plan",
-            status: "implemented",
-            purpose: "Print detected quality plan for the current repository.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "quality_planning",
-        },
-        CommandCatalogEntry {
-            command: "quality run RUN_ID",
-            status: "implemented",
-            purpose: "Rerun quality gates in the recorded isolated worktree.",
-            side_effects: "runs_local_commands_writes_quality_artifact_and_trace",
-            required_credentials: &[],
-            platform_constraints: &["recorded_worktree"],
-            sdk_use_case_owner: "bootstrap_quality_rerun",
-        },
-        CommandCatalogEntry {
-            command: "vcs prepare --issue 123 [--repo OWNER/REPO]",
-            status: "implemented",
-            purpose: "Prepare a local isolated Git worktree for an issue.",
-            side_effects: "creates_git_worktree",
-            required_credentials: &[],
-            platform_constraints: &["git"],
-            sdk_use_case_owner: "version_control_prepare_workspace",
-        },
-        CommandCatalogEntry {
-            command: "vcs status RUN_ID",
-            status: "implemented",
-            purpose: "Read recorded run worktree status and touched files.",
-            side_effects: "read_only_git_status_plus_trace_event",
-            required_credentials: &[],
-            platform_constraints: &["git", "recorded_worktree"],
-            sdk_use_case_owner: "bootstrap_vcs_status",
-        },
-        CommandCatalogEntry {
-            command: "vcs list [--json]",
-            status: "implemented",
-            purpose: "List retained local run worktrees from manifest artifacts.",
-            side_effects: "read_only_local_inventory",
-            required_credentials: &[],
-            platform_constraints: &["git", "recorded_worktree"],
-            sdk_use_case_owner: "bootstrap_vcs_inventory",
-        },
-        CommandCatalogEntry {
-            command: "vcs show RUN_ID [--json]",
-            status: "implemented",
-            purpose: "Show detailed recorded VCS/worktree metadata for one run.",
-            side_effects: "read_only_local_detail",
-            required_credentials: &[],
-            platform_constraints: &["git", "recorded_worktree"],
-            sdk_use_case_owner: "bootstrap_vcs_inventory",
-        },
-        CommandCatalogEntry {
-            command: "vcs diff RUN_ID [--output PATH]",
-            status: "implemented",
-            purpose: "Record a read-only workspace diff artifact for a run.",
-            side_effects: "writes_diff_artifact_and_trace",
-            required_credentials: &[],
-            platform_constraints: &["git", "recorded_worktree"],
-            sdk_use_case_owner: "version_control_diff",
-        },
-        CommandCatalogEntry {
-            command: "merge plan RUN_ID [--json]",
-            status: "implemented",
-            purpose: "Record a read-only merge risk plan artifact for a run.",
-            side_effects: "writes_merge_plan_artifact_and_trace",
-            required_credentials: &[],
-            platform_constraints: &["git", "recorded_worktree"],
-            sdk_use_case_owner: "version_control_merge_plan",
-        },
-        CommandCatalogEntry {
-            command: "trace list",
-            status: "implemented",
-            purpose: "Summarize run ids in the local JSONL event ledger.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "trace_inspection",
-        },
-        CommandCatalogEntry {
-            command: "trace show RUN_ID",
-            status: "implemented",
-            purpose: "Show a run-scoped trace timeline and artifact integrity summary.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "trace_inspection",
-        },
-        CommandCatalogEntry {
-            command: "debug bundle RUN_ID",
-            status: "implemented",
-            purpose: "Create a redacted local debug bundle for a run.",
-            side_effects: "writes_debug_bundle",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "debug_bundle",
-        },
-        CommandCatalogEntry {
-            command: "memory status",
-            status: "implemented",
-            purpose: "Print local memory controller status.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "memory_diagnostics",
-        },
-        CommandCatalogEntry {
-            command: "memory pressure",
-            status: "implemented",
-            purpose: "Print local memory pressure observations.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "memory_diagnostics",
-        },
-        CommandCatalogEntry {
-            command: "status",
-            status: "implemented",
-            purpose: "Print bootstrap CLI status.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "cli_status",
-        },
-        CommandCatalogEntry {
-            command: "daemon --config agentactr.toml",
-            status: "milestone",
-            purpose: "Run the future scheduler/daemon.",
-            side_effects: "not_implemented",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "scheduler_daemon",
-        },
-        CommandCatalogEntry {
-            command: "run query --repo OWNER/REPO --label agentactr:ready --human-intervention fail-closed",
-            status: "milestone",
-            purpose: "Run issues selected from tracker query results.",
-            side_effects: "not_implemented",
-            required_credentials: &["github_token", "codex_auth_or_codex_api_key"],
-            platform_constraints: &[],
-            sdk_use_case_owner: "run_query",
-        },
-        CommandCatalogEntry {
-            command: "replay RUN_ID",
-            status: "milestone",
-            purpose: "Rebuild run state from trace/artifacts and report divergence.",
-            side_effects: "not_implemented",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "replay",
-        },
-        CommandCatalogEntry {
-            command: "completions bash|zsh|fish|powershell|elvish",
-            status: "implemented",
-            purpose: "Generate shell completion scripts.",
-            side_effects: "read_only_stdout",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "cli_completion_generation",
-        },
-        CommandCatalogEntry {
-            command: "docs cli-markdown [--output PATH]",
-            status: "implemented",
-            purpose: "Generate Markdown CLI reference from the typed clap command tree and command catalog.",
-            side_effects: "read_only_stdout_or_explicit_doc_write",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "cli_documentation_generation",
-        },
-        CommandCatalogEntry {
-            command: "menu [--json]",
-            status: "implemented",
-            purpose: "Print a read-only command picker/setup navigator with exact commands.",
-            side_effects: "read_only",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "cli_menu",
-        },
-        CommandCatalogEntry {
-            command: "vcs commit RUN_ID",
-            status: "milestone",
-            purpose: "Create a local commit after quality gates.",
-            side_effects: "not_implemented",
-            required_credentials: &[],
-            platform_constraints: &["git"],
-            sdk_use_case_owner: "version_control_commit",
-        },
-        CommandCatalogEntry {
-            command: "vcs cleanup RUN_ID",
-            status: "milestone",
-            purpose: "Remove retained local worktree after retention/approval policy.",
-            side_effects: "not_implemented",
-            required_credentials: &[],
-            platform_constraints: &["git"],
-            sdk_use_case_owner: "version_control_cleanup",
-        },
-        CommandCatalogEntry {
-            command: "finalize RUN_ID --approve [--resume]",
-            status: "implemented",
-            purpose: "Approve and finalize tracker labels/comments/leases after review.",
-            side_effects: "writes_sqlite_trace_artifacts_and_mutates_tracker_when_verified",
-            required_credentials: &["github_token"],
-            platform_constraints: &["recorded_run_artifacts", "github_rest"],
-            sdk_use_case_owner: "finalization",
-        },
-        CommandCatalogEntry {
-            command: "finalize RUN_ID --reject --reason REASON [--resume]",
-            status: "implemented",
-            purpose: "Reject finalization and record a human review reason.",
-            side_effects: "writes_sqlite_trace_artifacts_and_mutates_tracker_when_verified",
-            required_credentials: &["github_token"],
-            platform_constraints: &["recorded_run_artifacts", "github_rest"],
-            sdk_use_case_owner: "finalization",
-        },
-        CommandCatalogEntry {
-            command: "eval swe-bench --subset verified-smoke",
-            status: "milestone",
-            purpose: "Run evaluation harnesses.",
-            side_effects: "not_implemented",
-            required_credentials: &[],
-            platform_constraints: &[],
-            sdk_use_case_owner: "evaluation",
-        },
-    ]
-}
-
-fn cmd_commands(args: &mut [String]) -> Result<(), String> {
-    match args.get(1).map(String::as_str) {
-        None => {
-            print_commands_text();
-            Ok(())
-        }
-        Some("--json") => {
-            print_commands_json()?;
-            Ok(())
-        }
-        _ => Err("usage: agentactr commands [--json]".to_string()),
-    }
-}
-
-fn print_commands_text() {
-    println!("agentactr commands");
-    for entry in command_catalog() {
-        println!(
-            "{}\tstatus={}\tside_effects={}\towner={}",
-            entry.command, entry.status, entry.side_effects, entry.sdk_use_case_owner
-        );
-        println!("  {}", entry.purpose);
-        if !entry.required_credentials.is_empty() {
-            println!(
-                "  required_credentials={}",
-                entry.required_credentials.join(",")
-            );
-        }
-        if !entry.platform_constraints.is_empty() {
-            println!(
-                "  platform_constraints={}",
-                entry.platform_constraints.join(",")
-            );
-        }
-    }
-}
-
-fn print_commands_json() -> Result<(), String> {
-    let commands = command_catalog()
-        .iter()
-        .map(command_catalog_entry_json)
-        .collect::<Vec<_>>();
-    let payload = serde_json::json!({
-        "schema_version": "0.1",
-        "commands": commands,
-    });
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&payload)
-            .map_err(|e| format!("render commands inventory: {e}"))?
-    );
-    Ok(())
-}
-
-fn command_catalog_entry_json(entry: &CommandCatalogEntry) -> serde_json::Value {
-    serde_json::json!({
-        "command": entry.command,
-        "status": entry.status,
-        "purpose": entry.purpose,
-        "side_effects": entry.side_effects,
-        "required_credentials": entry.required_credentials,
-        "platform_constraints": entry.platform_constraints,
-        "sdk_use_case_owner": entry.sdk_use_case_owner,
-    })
 }
 
 fn cmd_completions(args: &mut [String]) -> Result<(), String> {
@@ -1385,816 +1038,6 @@ fn completion_script(shell: Shell) -> Result<String, String> {
     let mut output = Vec::new();
     generate(shell, &mut command, "agentactr", &mut output);
     String::from_utf8(output).map_err(|e| format!("render completions utf8: {e}"))
-}
-
-fn cmd_docs(args: &mut [String]) -> Result<(), String> {
-    match args.get(1).map(String::as_str) {
-        Some("cli-markdown") => cmd_docs_cli_markdown(args),
-        _ => Err("usage: agentactr docs cli-markdown [--output PATH]".to_string()),
-    }
-}
-
-fn cmd_docs_cli_markdown(args: &[String]) -> Result<(), String> {
-    let mut output_path = None;
-    let mut index = 2;
-    while index < args.len() {
-        match args.get(index).map(String::as_str) {
-            Some("--output") => {
-                let value = args
-                    .get(index + 1)
-                    .ok_or("usage: agentactr docs cli-markdown [--output PATH]")?;
-                output_path = Some(PathBuf::from(value));
-                index += 2;
-            }
-            _ => return Err("usage: agentactr docs cli-markdown [--output PATH]".to_string()),
-        }
-    }
-
-    let markdown = render_cli_markdown()?;
-    if let Some(path) = output_path {
-        write_cli_markdown_output(&path, &markdown)?;
-    } else {
-        print!("{markdown}");
-    }
-    Ok(())
-}
-
-fn write_cli_markdown_output(path: &Path, markdown: &str) -> Result<(), String> {
-    if path.as_os_str().is_empty() {
-        return Err("docs output path must not be empty".to_string());
-    }
-    if path.exists() {
-        let metadata =
-            fs::symlink_metadata(path).map_err(|e| format!("inspect {}: {e}", path.display()))?;
-        if metadata.file_type().is_symlink() {
-            return Err(format!(
-                "docs output path must not be a symlink: {}",
-                path.display()
-            ));
-        }
-        if metadata.is_dir() {
-            return Err(format!(
-                "docs output path must not be a directory: {}",
-                path.display()
-            ));
-        }
-    }
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("create docs output directory {}: {e}", parent.display()))?;
-    }
-    fs::write(path, markdown).map_err(|e| format!("write {}: {e}", path.display()))
-}
-
-fn render_cli_markdown() -> Result<String, String> {
-    let mut output = String::new();
-    output.push_str("# agentactr CLI Reference\n\n");
-    output.push_str("<!-- Generated by `agentactr docs cli-markdown`; do not edit command sections by hand. -->\n\n");
-    output.push_str(
-        "This reference is generated from the typed `clap` command tree and the bootstrap command catalog. ",
-    );
-    output.push_str(
-        "The catalog supplies implementation status, side effects, required credentials, platform constraints, and SDK use-case ownership.\n\n",
-    );
-    output.push_str("## Commands\n\n");
-
-    for (help_path, entries) in command_catalog_help_groups() {
-        output.push_str(&format!(
-            "### `{}`\n\n",
-            markdown_help_heading_command(&help_path)
-        ));
-        output.push_str("| Catalog command | Status | Side effects | SDK owner | Required credentials | Platform constraints | Purpose |\n");
-        output.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
-        for entry in entries {
-            output.push_str(&format!(
-                "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} |\n",
-                markdown_table_cell(&format!("agentactr {}", entry.command)),
-                markdown_table_cell(entry.status),
-                markdown_table_cell(entry.side_effects),
-                markdown_table_cell(entry.sdk_use_case_owner),
-                markdown_table_cell(&markdown_list_or_none(entry.required_credentials)),
-                markdown_table_cell(&markdown_list_or_none(entry.platform_constraints)),
-                markdown_table_cell(entry.purpose)
-            ));
-        }
-        output.push('\n');
-
-        let help = render_generated_help(&help_path)?;
-        output.push_str("#### Generated Help\n\n");
-        output.push_str("```text\n");
-        output.push_str(help.trim_end());
-        output.push_str("\n```\n\n");
-    }
-
-    Ok(output)
-}
-
-fn command_catalog_help_groups() -> Vec<(Vec<String>, Vec<&'static CommandCatalogEntry>)> {
-    let mut groups: Vec<(Vec<String>, Vec<&CommandCatalogEntry>)> = Vec::new();
-    for entry in command_catalog() {
-        let help_path = catalog_help_path(entry.command);
-        if let Some((_, entries)) = groups.iter_mut().find(|(path, _)| path == &help_path) {
-            entries.push(entry);
-        } else {
-            groups.push((help_path, vec![entry]));
-        }
-    }
-    groups
-}
-
-fn markdown_help_heading_command(help_path: &[String]) -> String {
-    if help_path.is_empty() {
-        "agentactr".to_string()
-    } else {
-        format!("agentactr {}", help_path.join(" "))
-    }
-}
-
-fn markdown_table_cell(value: &str) -> String {
-    value.replace('|', "\\|").replace('\n', " ")
-}
-
-fn markdown_list_or_none(values: &[&str]) -> String {
-    if values.is_empty() {
-        "none".to_string()
-    } else {
-        values.join(",")
-    }
-}
-
-fn catalog_help_path(command: &str) -> Vec<String> {
-    let mut root = AgentactrHelpCli::command();
-    let mut path = Vec::new();
-    let mut current = &mut root;
-    for token in command.split_whitespace() {
-        let Some(next) = current.find_subcommand_mut(token) else {
-            break;
-        };
-        path.push(token.to_string());
-        current = next;
-    }
-    path
-}
-
-fn cmd_menu(args: &mut [String]) -> Result<(), String> {
-    match args.get(1).map(String::as_str) {
-        None => {
-            print_menu_text();
-            Ok(())
-        }
-        Some("--json") => {
-            print_menu_json()?;
-            Ok(())
-        }
-        _ => Err("usage: agentactr menu [--json]".to_string()),
-    }
-}
-
-fn print_menu_text() {
-    println!("agentactr menu");
-    println!("Bootstrap read-only navigator. Run the exact command shown for an action.");
-    for (index, entry) in command_catalog().iter().enumerate() {
-        println!(
-            "{:>2}. agentactr {}  [{}; side_effects={}]",
-            index + 1,
-            entry.command,
-            entry.status,
-            entry.side_effects
-        );
-        println!("    {}", entry.purpose);
-    }
-}
-
-fn print_menu_json() -> Result<(), String> {
-    let payload = menu_json_payload();
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&payload).map_err(|e| format!("render menu: {e}"))?
-    );
-    Ok(())
-}
-
-fn menu_json_payload() -> serde_json::Value {
-    let actions = command_catalog()
-        .iter()
-        .enumerate()
-        .map(|(index, entry)| {
-            let mut value = command_catalog_entry_json(entry);
-            if let Some(object) = value.as_object_mut() {
-                object.insert("index".to_string(), serde_json::json!(index + 1));
-                object.insert(
-                    "equivalent_command".to_string(),
-                    serde_json::json!(format!("agentactr {}", entry.command)),
-                );
-                object.insert("executes".to_string(), serde_json::json!(false));
-            }
-            value
-        })
-        .collect::<Vec<_>>();
-    serde_json::json!({
-        "schema_version": "0.1",
-        "mode": "bootstrap_read_only",
-        "automation_surface": "agentactr commands --json",
-        "actions": actions,
-    })
-}
-
-fn cmd_init(args: &mut [String]) -> Result<(), String> {
-    let repo = flag_value(args, "--repo").unwrap_or_else(|| "OWNER/REPO".to_string());
-    let yes = has_flag(args, "--yes");
-    if !yes {
-        return Err("init is fail-closed by default; pass --yes to write files".to_string());
-    }
-
-    let auth_mode = flag_value(args, "--codex-auth")
-        .map(|v| CodexAuthMode::parse(&v))
-        .transpose()?
-        .unwrap_or(CodexAuthMode::Auto);
-    let mut config = AgentactrConfig::strict_defaults(repo);
-    config.codex.auth_mode = auth_mode;
-
-    let creds = detect_credentials(&config);
-
-    create_dir(".codex")?;
-    create_dir(".agentactr")?;
-    create_dir(".agentactr/runs")?;
-    create_dir(".agentactr/artifacts")?;
-    create_dir(".agentactr/debug")?;
-    create_dir(".agentactr/workspaces")?;
-    create_dir(".agentactr/worktrees")?;
-
-    write_file("agentactr.toml", &render_agentactr_toml(&config))?;
-    write_file(
-        ".codex/config.toml",
-        &render_codex_config_toml(&config, &creds),
-    )?;
-    write_file("WORKFLOW.md", &render_workflow_md())?;
-    let inspection = configured_repo_inspection(Path::new("."), &config);
-    write_agents_if_absent(&config, &inspection)?;
-    append_gitignore(&render_gitignore_additions())?;
-
-    println!("wrote agentactr.toml");
-    println!("wrote .codex/config.toml");
-    println!("wrote WORKFLOW.md");
-    if Path::new("AGENTS.md").exists() {
-        println!("ensured AGENTS.md");
-    }
-    println!("updated .gitignore");
-    print_mcp_summary(&creds);
-    Ok(())
-}
-
-fn cmd_doctor(args: &mut [String]) -> Result<(), String> {
-    let fix = has_flag(args, "--fix-codex-config");
-    let fix_agents = has_flag(args, "--fix-agents");
-    let trust_codex_project = has_flag(args, "--trust-codex-project");
-    let config = load_agentactr_config(None)?;
-    let creds = detect_credentials(&config);
-    let mut fixed_codex_user_config = None;
-    let execution_decision = resolve_execution_backend(&config.execution).ok();
-
-    if fix {
-        create_dir(".codex")?;
-        write_file(
-            ".codex/config.toml",
-            &render_codex_config_toml(&config, &creds),
-        )?;
-    }
-
-    if trust_codex_project {
-        fixed_codex_user_config = Some(trust_current_codex_project()?);
-    }
-
-    println!("agentactr doctor");
-    check_path("agentactr.toml");
-    check_path(".codex/config.toml");
-    check_path("WORKFLOW.md");
-    if execution_decision
-        .as_ref()
-        .map(should_probe_host_codex)
-        .unwrap_or(true)
-    {
-        check_command("agentactr", &["--help"]);
-        check_command(&config.codex.command, &["--version"]);
-    } else {
-        println!("ok: host agentactr/Codex probes skipped for Docker Linux execution backend");
-    }
-    check_command("git", &["--version"]);
-    if execution_decision
-        .as_ref()
-        .map(should_probe_host_codex)
-        .unwrap_or(true)
-    {
-        check_codex_login_status(&config.codex.command, &config.codex.openai_api_key_env);
-        check_codex_project_trust(Path::new("."));
-    } else {
-        println!("ok: host Codex auth/trust probes skipped; Docker runtime image is authoritative");
-    }
-    if check_codex_transport(&config) == Some(CodexMode::CliJsonExec) {
-        if execution_decision
-            .as_ref()
-            .map(should_probe_host_codex)
-            .unwrap_or(true)
-        {
-            check_codex_exec_capacity(&config);
-        } else {
-            println!(
-                "ok: host Codex exec capacity probe skipped for Docker Linux execution backend"
-            );
-        }
-    }
-    check_env(&config.tracker.token_env, "GitHub token");
-    check_optional_env("GH_TOKEN", "alternate GitHub token");
-    check_optional_env(
-        &config.codex.openai_api_key_env,
-        "Codex API key for codex exec",
-    );
-    check_optional_env(
-        "OPENAI_API_KEY",
-        "OpenAI API key for codex login --with-api-key",
-    );
-    check_optional_env("GOOGLE_API_KEY", "Google Developer API key");
-    check_optional_env("HF_TOKEN", "Hugging Face token");
-    check_github_token_governance(&config);
-    check_github_api_version(&config);
-    check_github_lifecycle_labels(&config);
-    check_sqlite_store(&config);
-    check_otlp(&config);
-    check_workspace_permissions(&config);
-    print_mcp_summary(&creds);
-    print_security_summary(&config);
-    print_memory_status();
-    print_execution_status(&config);
-    print_doctor_adapter_versions(&config)?;
-    let inspection = configured_repo_inspection(Path::new("."), &config);
-    if fix_agents {
-        write_agents_if_absent_or_artifact(&config, &inspection)?;
-    }
-    print_domain_summary(&config, &inspection);
-    print_repo_inspection(&inspection);
-
-    if fix {
-        println!("fixed .codex/config.toml");
-        println!("Codex project trust was not changed by --fix-codex-config");
-        println!("To explicitly trust this project, run `agentactr doctor --trust-codex-project`");
-    }
-    if trust_codex_project {
-        if let Some(path) = fixed_codex_user_config {
-            println!("fixed Codex project trust in {}", path.display());
-        }
-    }
-    Ok(())
-}
-
-fn write_agents_if_absent(
-    config: &AgentactrConfig,
-    inspection: &RepoInspection,
-) -> Result<(), String> {
-    match config.templates.agents_policy.as_str() {
-        "disabled" => return Ok(()),
-        "artifact_only" => return write_agents_review_artifact(config, inspection).map(|_| ()),
-        "generate_when_absent" => {}
-        other => return Err(format!("unsupported templates.agents_policy `{other}`")),
-    }
-    if Path::new("AGENTS.md").exists() {
-        return Ok(());
-    }
-    write_file("AGENTS.md", &render_agents_md(config, inspection))
-}
-
-fn write_agents_if_absent_or_artifact(
-    config: &AgentactrConfig,
-    inspection: &RepoInspection,
-) -> Result<(), String> {
-    match config.templates.agents_policy.as_str() {
-        "disabled" => {
-            println!("templates.agents_policy=disabled; skipped AGENTS.md generation");
-            write_domain_artifacts(config, inspection)?;
-            return Ok(());
-        }
-        "artifact_only" => {
-            let generated = write_agents_review_artifact(config, inspection)?;
-            println!("wrote AGENTS.md review artifact {}", generated.display());
-            write_domain_artifacts(config, inspection)?;
-            return Ok(());
-        }
-        "generate_when_absent" => {}
-        other => return Err(format!("unsupported templates.agents_policy `{other}`")),
-    }
-    if !Path::new("AGENTS.md").exists() {
-        write_file("AGENTS.md", &render_agents_md(config, inspection))?;
-        println!("fixed AGENTS.md");
-        write_domain_artifacts(config, inspection)?;
-        return Ok(());
-    }
-    let generated = write_agents_review_artifact(config, inspection)?;
-    println!(
-        "AGENTS.md already exists; wrote review artifact {}",
-        generated.display()
-    );
-    write_domain_artifacts(config, inspection)?;
-    Ok(())
-}
-
-fn write_agents_review_artifact(
-    config: &AgentactrConfig,
-    inspection: &RepoInspection,
-) -> Result<PathBuf, String> {
-    let artifact_dir = PathBuf::from(&config.observability.artifact_root).join("doctor");
-    fs::create_dir_all(&artifact_dir)
-        .map_err(|e| format!("create doctor artifact dir {}: {e}", artifact_dir.display()))?;
-    let generated = artifact_dir.join("AGENTS.md.generated");
-    fs::write(&generated, render_agents_md(config, inspection))
-        .map_err(|e| format!("write {}: {e}", generated.display()))?;
-    Ok(generated)
-}
-
-fn write_domain_artifacts(
-    config: &AgentactrConfig,
-    inspection: &RepoInspection,
-) -> Result<(), String> {
-    let graph_path = resolve_config_path(&config.architecture.domain_graph_artifact)?;
-    let artifact_dir = graph_path.parent().ok_or_else(|| {
-        format!(
-            "invalid domain graph artifact path {}",
-            graph_path.display()
-        )
-    })?;
-    fs::create_dir_all(artifact_dir)
-        .map_err(|e| format!("create domain artifact dir {}: {e}", artifact_dir.display()))?;
-    let findings_path = artifact_dir.join("domain_findings.json");
-    let quality_path = artifact_dir.join("domain_quality_plan.json");
-    let graph_json = domain_graph_to_json(&inspection.domain_graph);
-    let findings = domain_findings(&inspection.root);
-    let findings_json = domain_findings_to_json(&findings);
-    let quality_json = domain_quality_plan_to_json(&inspection.domain_quality_plan);
-    fs::write(
-        &graph_path,
-        serde_json::to_string_pretty(&graph_json)
-            .map_err(|e| format!("render {}: {e}", graph_path.display()))?,
-    )
-    .map_err(|e| format!("write {}: {e}", graph_path.display()))?;
-    fs::write(
-        &findings_path,
-        serde_json::to_string_pretty(&findings_json)
-            .map_err(|e| format!("render {}: {e}", findings_path.display()))?,
-    )
-    .map_err(|e| format!("write {}: {e}", findings_path.display()))?;
-    fs::write(
-        &quality_path,
-        serde_json::to_string_pretty(&quality_json)
-            .map_err(|e| format!("render {}: {e}", quality_path.display()))?,
-    )
-    .map_err(|e| format!("write {}: {e}", quality_path.display()))?;
-    println!("wrote domain graph artifact {}", graph_path.display());
-    println!("wrote domain findings artifact {}", findings_path.display());
-    println!("wrote domain quality artifact {}", quality_path.display());
-    Ok(())
-}
-
-fn cmd_config(args: &mut [String]) -> Result<(), String> {
-    if args.len() < 2 {
-        return Err("usage: agentactr config get [KEY] | set KEY VALUE".to_string());
-    }
-    match args[1].as_str() {
-        "get" => {
-            let content = fs::read_to_string("agentactr.toml")
-                .map_err(|e| format!("read agentactr.toml: {e}"))?;
-            if args.len() == 2 {
-                print!("{content}");
-                return Ok(());
-            }
-            let key = &args[2];
-            if let Some(value) = find_config_value(&content, key) {
-                println!("{value}");
-                Ok(())
-            } else {
-                Err(format!("key not found: {key}"))
-            }
-        }
-        "set" => {
-            if args.len() < 4 {
-                return Err("usage: agentactr config set KEY VALUE".to_string());
-            }
-            set_config_value("agentactr.toml", &args[2], &args[3])?;
-            println!("updated {}", args[2]);
-            Ok(())
-        }
-        other => Err(format!("unknown config subcommand `{other}`")),
-    }
-}
-
-fn cmd_auth(args: &mut [String]) -> Result<(), String> {
-    if args.get(1).map(String::as_str) != Some("codex") {
-        return Err(
-            "usage: agentactr auth codex --method chatgpt|subscription|api-key".to_string(),
-        );
-    }
-    let config = load_agentactr_config(None)?;
-    let method = flag_value(args, "--method").unwrap_or_else(|| "chatgpt".to_string());
-    match method.as_str() {
-        "chatgpt" | "subscription" => run_status(Command::new(&config.codex.command).arg("login")),
-        "api-key" | "api_key" => {
-            let env_name =
-                flag_value(args, "--api-key-env").unwrap_or(config.codex.openai_api_key_env);
-            env::var(&env_name).map_err(|_| {
-                format!("missing {env_name}; set it before running API-key Codex auth")
-            })?;
-            println!(
-                "ok: {env_name} is set; codex exec will use API-key auth without a stored login"
-            );
-            Ok(())
-        }
-        other => Err(format!("unsupported auth method `{other}`")),
-    }
-}
-
-fn cmd_mcp(args: &mut [String]) -> Result<(), String> {
-    if args.get(1).map(String::as_str) != Some("serve") {
-        return Err("usage: agentactr mcp serve".to_string());
-    }
-    serve_mcp_stdio()
-}
-
-fn serve_mcp_stdio() -> Result<(), String> {
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    for line in stdin.lock().lines() {
-        let line = line.map_err(|e| format!("read MCP request: {e}"))?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let Some(response) = handle_mcp_json_rpc(trimmed) else {
-            continue;
-        };
-        stdout
-            .write_all(response.as_bytes())
-            .map_err(|e| format!("write MCP response: {e}"))?;
-        stdout
-            .write_all(b"\n")
-            .map_err(|e| format!("write MCP newline: {e}"))?;
-        stdout.flush().map_err(|e| format!("flush MCP: {e}"))?;
-    }
-    Ok(())
-}
-
-fn handle_mcp_json_rpc(request: &str) -> Option<String> {
-    let parsed = serde_json::from_str::<serde_json::Value>(request).ok()?;
-    let id = parsed.get("id").cloned().unwrap_or(serde_json::Value::Null);
-    let method = parsed.get("method").and_then(serde_json::Value::as_str)?;
-    if method.starts_with("notifications/") {
-        return None;
-    }
-    let id = id.to_string();
-    let result = match method {
-        "initialize" => mcp_initialize_result_json(&parsed),
-        "ping" => "{}".to_string(),
-        "tools/list" => mcp_tools_list_json(),
-        "tools/call" => {
-            let tool_name = parsed
-                .pointer("/params/name")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("unknown");
-            let arguments = parsed
-                .pointer("/params/arguments")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({}));
-            mcp_tool_call_result_json(tool_name, &arguments)
-        }
-        _ => {
-            return Some(format!(
-                r#"{{"jsonrpc":"2.0","id":{id},"error":{{"code":-32601,"message":"method not found: {}"}}}}"#,
-                json_escape(method)
-            ));
-        }
-    };
-    Some(format!(
-        r#"{{"jsonrpc":"2.0","id":{id},"result":{result}}}"#
-    ))
-}
-
-fn mcp_initialize_result_json(request: &serde_json::Value) -> String {
-    let requested = request
-        .pointer("/params/protocolVersion")
-        .and_then(serde_json::Value::as_str);
-    let protocol_version = requested
-        .filter(|version| MCP_PROTOCOL_SUPPORTED.contains(version))
-        .unwrap_or(MCP_PROTOCOL_LATEST);
-    format!(
-        r#"{{"protocolVersion":"{}","capabilities":{{"tools":{{"listChanged":false}}}},"serverInfo":{{"name":"agentactr","version":"0.1.0"}}}}"#,
-        json_escape(protocol_version)
-    )
-}
-
-fn mcp_tools_list_json() -> String {
-    let tools = [
-        (
-            "agentactr.issue.read",
-            "Read local issue context captured by agentactr.",
-        ),
-        ("agentactr.run.status", "Read local agentactr run status."),
-        ("agentactr.trace.read", "Read local trace metadata."),
-        ("agentactr.artifact.read", "Read local artifact metadata."),
-        ("agentactr.vcs.status", "Read local VCS status metadata."),
-        (
-            "agentactr.quality.report",
-            "Read local quality report metadata.",
-        ),
-        (
-            "agentactr.memory.status",
-            "Read local memory status metadata.",
-        ),
-        ("agentactr.policy.read", "Read effective local policy."),
-    ];
-    let rendered = tools
-        .iter()
-        .map(|(name, description)| {
-            format!(
-                r#"{{"name":"{}","description":"{}","inputSchema":{}}}"#,
-                json_escape(name),
-                json_escape(description),
-                mcp_tool_input_schema_json(name)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(r#"{{"tools":[{rendered}]}}"#)
-}
-
-fn mcp_tool_input_schema_json(tool_name: &str) -> &'static str {
-    match tool_name {
-        "agentactr.issue.read" | "agentactr.artifact.read" => {
-            r#"{"type":"object","properties":{"run_id":{"type":"string","description":"Run id to scope artifact lookup when AGENTACTR_ARTIFACT_ROOT points at the artifact root."},"artifact_root":{"type":"string","description":"Artifact root or run artifact directory."}},"additionalProperties":false}"#
-        }
-        "agentactr.trace.read" => {
-            r#"{"type":"object","properties":{"trace_path":{"type":"string","description":"Explicit trace JSONL path."}},"additionalProperties":false}"#
-        }
-        _ => r#"{"type":"object","properties":{},"additionalProperties":false}"#,
-    }
-}
-
-fn mcp_tool_call_result_json(tool_name: &str, arguments: &serde_json::Value) -> String {
-    let result = match tool_name {
-        "agentactr.run.status" => Ok("run_status: no active in-process run registry in this milestone".to_string()),
-        "agentactr.memory.status" => Ok(memory_status_text()),
-        "agentactr.policy.read" => Ok("policy: human_intervention=fail_closed by default; codex.approval_policy=never by default; github write MCP tools disabled".to_string()),
-        "agentactr.quality.report" => Ok(mcp_quality_report_text()),
-        "agentactr.vcs.status" => Ok(mcp_vcs_status_text()),
-        "agentactr.artifact.read" => mcp_artifact_text(arguments),
-        "agentactr.trace.read" => Ok(mcp_trace_text(arguments)),
-        "agentactr.issue.read" => mcp_issue_text(arguments),
-        other => Err(format!("unknown agentactr MCP tool: {other}")),
-    };
-    let (text, is_error) = match result {
-        Ok(text) => (text, false),
-        Err(err) => (err, true),
-    };
-    format!(
-        r#"{{"content":[{{"type":"text","text":"{}"}}],"isError":{}}}"#,
-        json_escape(&text),
-        if is_error { "true" } else { "false" }
-    )
-}
-
-fn memory_status_text() -> String {
-    let config = load_agentactr_config(None)
-        .map(|config| config.linux_memory)
-        .unwrap_or_else(|_| AgentactrConfig::strict_defaults("OWNER/REPO").linux_memory);
-    LinuxMemoryController::new(&config).memory_status_text()
-}
-
-fn mcp_quality_report_text() -> String {
-    let inspection = load_agentactr_config(None)
-        .map(|config| configured_repo_inspection(Path::new("."), &config))
-        .unwrap_or_else(|_| discover_repository(Path::new(".")));
-    let commands = inspection
-        .quality_plan
-        .iter()
-        .map(|cmd| cmd.command.as_str())
-        .collect::<Vec<_>>()
-        .join("; ");
-    format!(
-        "detected_stack={} selected_stack={} confidence={} missing_prerequisites={} quality_plan={}",
-        inspection.detected_stack.as_str(),
-        inspection.primary_stack.as_str(),
-        inspection.confidence,
-        inspection.missing_prerequisites.join("; "),
-        commands
-    )
-}
-
-fn mcp_vcs_status_text() -> String {
-    let output = Command::new("git")
-        .arg("status")
-        .arg("--porcelain")
-        .output();
-    match output {
-        Ok(output) if output.status.success() => {
-            let status = String::from_utf8_lossy(&output.stdout);
-            if status.trim().is_empty() {
-                "git=true dirty=false".to_string()
-            } else {
-                format!("git=true dirty=true entries={}", status.lines().count())
-            }
-        }
-        Ok(output) => format!(
-            "git=false error={}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ),
-        Err(err) => format!("git=false error={err}"),
-    }
-}
-
-fn mcp_artifact_text(arguments: &serde_json::Value) -> Result<String, String> {
-    let root = agentactr_artifact_root(arguments)?;
-    Ok(list_dir_names(&root, "artifacts"))
-}
-
-fn mcp_trace_text(arguments: &serde_json::Value) -> String {
-    let path = agentactr_trace_path(arguments);
-    if path.exists() {
-        match fs::metadata(&path) {
-            Ok(meta) => format!("trace_events_path={} bytes={}", path.display(), meta.len()),
-            Err(err) => format!("trace_events_path={} metadata_error={err}", path.display()),
-        }
-    } else {
-        format!("trace_events_path={} present=false", path.display())
-    }
-}
-
-fn mcp_issue_text(arguments: &serde_json::Value) -> Result<String, String> {
-    let artifacts = agentactr_artifact_root(arguments)?;
-    let direct_issue = artifacts.join("github_issue.json");
-    if direct_issue.exists() {
-        return fs::read_to_string(&direct_issue)
-            .map_err(|e| format!("read {}: {e}", direct_issue.display()));
-    }
-    Err(format!(
-        "no run-scoped github_issue.json artifact found at {}; pass run_id or set AGENTACTR_ARTIFACT_ROOT to the run artifact directory",
-        direct_issue.display()
-    ))
-}
-
-fn agentactr_artifact_root(arguments: &serde_json::Value) -> Result<std::path::PathBuf, String> {
-    let root = arguments
-        .get("artifact_root")
-        .and_then(serde_json::Value::as_str)
-        .map(PathBuf::from)
-        .or_else(|| env::var("AGENTACTR_ARTIFACT_ROOT").ok().map(PathBuf::from))
-        .unwrap_or_else(|| Path::new(".agentactr").join("artifacts"));
-    if let Some(run_id) = arguments.get("run_id").and_then(serde_json::Value::as_str) {
-        validate_run_id(run_id)?;
-        if root.file_name().and_then(|name| name.to_str()) == Some(run_id) {
-            Ok(root)
-        } else {
-            Ok(root.join(run_id))
-        }
-    } else {
-        Ok(root)
-    }
-}
-
-fn agentactr_trace_path(arguments: &serde_json::Value) -> std::path::PathBuf {
-    arguments
-        .get("trace_path")
-        .and_then(serde_json::Value::as_str)
-        .map(std::path::PathBuf::from)
-        .or_else(|| env::var("AGENTACTR_TRACE_PATH").ok().map(PathBuf::from))
-        .or_else(|| {
-            env::var("AGENTACTR_REPO_ROOT")
-                .ok()
-                .map(|root| Path::new(&root).join(".agentactr/runs/events.jsonl"))
-        })
-        .unwrap_or_else(|| Path::new(".agentactr/runs/events.jsonl").to_path_buf())
-}
-
-fn list_dir_names(root: &Path, label: &str) -> String {
-    let entries = match fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(_) => return format!("{label}_path={} present=false", root.display()),
-    };
-    let names = entries
-        .flatten()
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .collect::<Vec<_>>();
-    format!(
-        "{label}_path={} entries={}",
-        root.display(),
-        names.join(",")
-    )
-}
-
-fn json_escape(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t")
 }
 
 fn resolve_config_path(value: &str) -> Result<PathBuf, String> {
@@ -2238,13 +1081,8 @@ fn run_artifact_dir(config: &AgentactrConfig, run_id: &str) -> Result<PathBuf, S
     Ok(resolve_config_path(&config.observability.artifact_root)?.join(run_id))
 }
 
-fn run_trace_path(config: &AgentactrConfig) -> Result<PathBuf, String> {
+pub(crate) fn run_trace_path(config: &AgentactrConfig) -> Result<PathBuf, String> {
     resolve_config_path(&config.observability.jsonl)
-}
-
-fn debug_bundle_dir(config: &AgentactrConfig, run_id: &str) -> Result<PathBuf, String> {
-    validate_run_id(run_id)?;
-    Ok(resolve_config_path(&config.observability.debug_bundle_root)?.join(run_id))
 }
 
 pub(crate) fn current_epoch_millis() -> u128 {
@@ -2287,7 +1125,7 @@ fn civil_from_unix_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
     (year as i32, month as u32, day as u32)
 }
 
-struct RunEventContext<'a> {
+pub(crate) struct RunEventContext<'a> {
     config: &'a AgentactrConfig,
     run_id: &'a str,
     repo: &'a str,
@@ -2297,7 +1135,12 @@ struct RunEventContext<'a> {
 }
 
 impl<'a> RunEventContext<'a> {
-    fn root(config: &'a AgentactrConfig, run_id: &'a str, repo: &'a str, issue: &'a str) -> Self {
+    pub(crate) fn root(
+        config: &'a AgentactrConfig,
+        run_id: &'a str,
+        repo: &'a str,
+        issue: &'a str,
+    ) -> Self {
         Self {
             config,
             run_id,
@@ -2358,7 +1201,7 @@ impl ChildMemoryAssignment {
     }
 }
 
-fn append_run_event(
+pub(crate) fn append_run_event(
     context: &RunEventContext<'_>,
     event_type: &str,
     payload: serde_json::Value,
@@ -3326,52 +2169,6 @@ fn cmd_run(args: &mut [String]) -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_issue(args: &mut [String]) -> Result<(), String> {
-    match args.get(1).map(String::as_str) {
-        Some("find") => cmd_issue_find(args),
-        Some("draft") => cmd_issue_draft(args),
-        Some("proposals") => {
-            let issue_set_id = args
-                .get(2)
-                .ok_or("usage: agentactr issue proposals ISSUE_SET_ID")?;
-            let config = load_agentactr_config(None)?;
-            let context = load_issue_set_context(&config, issue_set_id)?;
-            let proposals = load_issue_proposals(&context)?;
-            if proposals.is_empty() {
-                println!(
-                    "no issue proposals found for issue set {}; expected {}",
-                    issue_set_id,
-                    issue_proposals_path(&context).display()
-                );
-                return Ok(());
-            }
-            println!("issue proposals for issue set {issue_set_id}:");
-            for proposal in proposals {
-                let parent = proposal
-                    .parent_issue
-                    .map(|issue| format!("#{issue}"))
-                    .unwrap_or_else(|| "none".to_string());
-                println!(
-                    "  {} repo={} parent={} dedupe={} title={} digest={}",
-                    proposal.proposal_id.as_str(),
-                    proposal.repo,
-                    parent,
-                    proposal.dedupe.as_str(),
-                    proposal.title,
-                    proposal.digest
-                );
-            }
-            Ok(())
-        }
-        Some("submit") => cmd_issue_submit(args),
-        Some("mark") => cmd_issue_mark(args),
-        _ => Err(
-            "usage: agentactr issue find --repo OWNER/REPO | agentactr issue draft --repo OWNER/REPO [--prompt TEXT] --stack STACK [--codex-draft] [--codex-review] | agentactr issue proposals ISSUE_SET_ID | agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--resume] [--require-codex-review] | agentactr issue mark ISSUE_SET_ID --proposal PROPOSAL_ID --dedupe unique|duplicate_blocked --reason TEXT"
-                .to_string(),
-        ),
-    }
-}
-
 fn cmd_finalize(args: &mut [String]) -> Result<(), String> {
     let run_id = args
         .get(1)
@@ -3461,1941 +2258,6 @@ fn cmd_finalize(args: &mut [String]) -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_issue_find(args: &mut [String]) -> Result<(), String> {
-    let repo = flag_value(args, "--repo").ok_or("missing --repo OWNER/REPO for issue find")?;
-    validate_github_repo(&repo)?;
-    let mut config = load_agentactr_config(Some(&repo))?;
-    apply_issue_artifact_root_override(&mut config, args)?;
-    let query = parse_candidate_query(args, &repo)?;
-    let issue_set_id = new_issue_set_id("find");
-    let context = create_issue_set_context(
-        &config,
-        &issue_set_id,
-        &repo,
-        None,
-        None,
-        IssueSetSource::Find,
-    )?;
-    let tracker = GithubRestAdapter::new(&context.artifact_dir, &config.tracker);
-    let candidates = tracker.fetch_candidates(query)?;
-    write_issue_set_manifest(&context, &config, None)?;
-    write_issue_candidates(&context, &candidates)?;
-    if has_flag(args, "--json") {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "issue_set_id": context.issue_set_id,
-                "artifact_dir": context.artifact_dir,
-                "candidate_count": candidates.len(),
-                "manifest_path": context.manifest_path,
-                "candidates_path": context.candidates_path,
-            }))
-            .map_err(|e| format!("render issue find JSON: {e}"))?
-        );
-    } else {
-        println!("issue_set_id={}", context.issue_set_id);
-        println!("artifact_dir={}", context.artifact_dir.display());
-        println!("candidate_count={}", candidates.len());
-    }
-    Ok(())
-}
-
-fn cmd_issue_draft(args: &mut [String]) -> Result<(), String> {
-    let repo = flag_value(args, "--repo").ok_or("missing --repo OWNER/REPO for issue draft")?;
-    validate_github_repo(&repo)?;
-    let mut config = load_agentactr_config(Some(&repo))?;
-    apply_issue_artifact_root_override(&mut config, args)?;
-    let query = parse_candidate_query(args, &repo)?;
-    let issue_set_id = new_issue_set_id("draft");
-    let parent_issue = flag_value(args, "--parent")
-        .map(|value| {
-            value
-                .parse::<u64>()
-                .map_err(|_| format!("invalid --parent `{value}`"))
-        })
-        .transpose()?;
-    let framework = parse_framework_declaration(flag_value(args, "--framework").as_deref())?;
-    let prompt = load_issue_draft_prompt(args)?;
-    let local_inspection = configured_repo_inspection(Path::new("."), &config);
-    let stack = flag_value(args, "--stack")
-        .or_else(|| selected_repo_stack_name(&config))
-        .or_else(|| discovered_repo_stack_name(&local_inspection))
-        .filter(|stack| stack != "unknown");
-    if stack.is_none() {
-        return Err(
-            "issue draft requires --stack or repository.declared_primary_stack before writing proposals"
-                .to_string(),
-        );
-    }
-    if prompt.is_none()
-        && (local_inspection.is_empty
-            || local_inspection.evidence_files.is_empty()
-            || local_inspection.confidence < 50)
-    {
-        return Err(
-            "issue draft without --prompt requires local repository evidence; blank projects must pass --prompt and --stack"
-                .to_string(),
-        );
-    }
-    let mut context = create_issue_set_context(
-        &config,
-        &issue_set_id,
-        &repo,
-        parent_issue,
-        framework.clone(),
-        IssueSetSource::Draft,
-    )?;
-    let tracker = GithubRestAdapter::new(&context.artifact_dir, &config.tracker);
-    let candidates = tracker.fetch_candidates(query.clone())?;
-    let prompt_artifacts = prompt
-        .as_ref()
-        .map(|prompt| write_prompt_artifacts(&context, prompt))
-        .transpose()?;
-    if let Some(artifacts) = prompt_artifacts.as_ref() {
-        context.planner_prompt_path = Some(artifacts.redacted_path.clone());
-        context.planner_metadata_path = Some(context.artifact_dir.join("planner_metadata.json"));
-        let _ = &artifacts.metadata_path;
-    }
-    let draft_request = agentactr_sdk::IssueDraftRequest {
-        issue_set_id: context.issue_set_id.clone(),
-        repo: repo.clone(),
-        parent_issue,
-        prompt: prompt.as_ref().map(|prompt| redact_prompt(prompt)),
-        framework: framework.clone(),
-        stack: stack.clone(),
-        candidates: candidates.clone(),
-        query,
-    };
-    let codex_draft = if has_flag(args, "--codex-draft") {
-        if prompt.is_none() {
-            return Err("--codex-draft requires --prompt or --prompt-file so the LLM draft has explicit operator intent".to_string());
-        }
-        Some(run_codex_issue_draft_planner(
-            &config,
-            &context,
-            &draft_request,
-            prompt.as_deref().unwrap_or_default(),
-            stack.as_deref().unwrap_or("unknown"),
-            &local_inspection,
-        )?)
-    } else {
-        None
-    };
-    let draft = if let Some(codex_draft) = codex_draft.as_ref() {
-        agentactr_sdk::draft_issue_proposals_from_structured_json(
-            draft_request,
-            &fs::read_to_string(&codex_draft.response_path).map_err(|e| {
-                format!(
-                    "read Codex issue draft response {}: {e}",
-                    codex_draft.response_path.display()
-                )
-            })?,
-            "codex_read_only_structured_issue_draft_planner",
-        )?
-    } else {
-        let planner = agentactr_sdk::DeterministicIssueDraftPlanner;
-        planner.draft(draft_request)?
-    };
-    let codex_review = if has_flag(args, "--codex-review") {
-        Some(run_codex_issue_draft_review(
-            &config,
-            &context,
-            &draft.proposals,
-            stack.as_deref().unwrap_or("unknown"),
-        )?)
-    } else {
-        None
-    };
-    write_planner_metadata(
-        &context,
-        &draft,
-        if codex_draft.is_some() {
-            "codex_read_only_structured_issue_draft_planner"
-        } else {
-            "agentactr-sdk-deterministic-issue-draft-planner"
-        },
-    )?;
-    write_issue_set_manifest(&context, &config, stack.as_deref())?;
-    write_issue_candidates(&context, &candidates)?;
-    write_issue_proposals(&context, &draft.proposals)?;
-    write_issue_dedupe_report(&context, &draft.proposals, &candidates)?;
-    materialize_issue_submission_pending(&config, &context.issue_set_id, &draft.proposals)?;
-    if has_flag(args, "--json") {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "issue_set_id": context.issue_set_id,
-                "artifact_dir": context.artifact_dir,
-                "candidate_count": candidates.len(),
-                "proposal_count": draft.proposals.len(),
-                "manifest_path": context.manifest_path,
-                "proposals_path": context.proposals_path,
-                "planner_prompt_path": context.planner_prompt_path,
-                "planner_metadata_path": context.planner_metadata_path,
-                "codex_draft_status_path": codex_draft.as_ref().map(|draft| draft.status_path.clone()),
-                "codex_draft_response_path": codex_draft.as_ref().map(|draft| draft.response_path.clone()),
-                "codex_review_status_path": codex_review.as_ref().map(|review| review.status_path.clone()),
-                "codex_review_markdown_path": codex_review.as_ref().map(|review| review.review_path.clone()),
-            }))
-            .map_err(|e| format!("render issue draft JSON: {e}"))?
-        );
-    } else {
-        println!("issue_set_id={}", context.issue_set_id);
-        println!("artifact_dir={}", context.artifact_dir.display());
-        println!("candidate_count={}", candidates.len());
-        println!("proposal_count={}", draft.proposals.len());
-        if let Some(artifacts) = prompt_artifacts {
-            println!("prompt_artifact={}", artifacts.redacted_path.display());
-        }
-        if let Some(draft) = codex_draft {
-            println!("codex_draft_status={}", draft.status_path.display());
-            println!("codex_draft_response={}", draft.response_path.display());
-        }
-        if let Some(review) = codex_review {
-            println!("codex_review_status={}", review.status_path.display());
-            println!("codex_review={}", review.review_path.display());
-        }
-    }
-    Ok(())
-}
-
-fn cmd_issue_submit(args: &mut [String]) -> Result<(), String> {
-    let issue_set_id = args.get(2).ok_or(
-        "usage: agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--resume] [--require-codex-review]",
-    )?;
-    if !has_flag(args, "--yes") {
-        return Err(
-            "issue submit is review-gated; pass --yes after reviewing the proposal".to_string(),
-        );
-    }
-    let proposal_id =
-        flag_value(args, "--proposal").ok_or("missing --proposal PROPOSAL_ID for issue submit")?;
-    let resume = has_flag(args, "--resume");
-    let allow_possible_duplicate = has_flag(args, "--allow-possible-duplicate");
-    let duplicate_reason = flag_value(args, "--reason");
-    let config = load_agentactr_config(None)?;
-    let context = load_issue_set_context(&config, issue_set_id)?;
-    let proposal = load_issue_proposals(&context)?
-        .into_iter()
-        .find(|proposal| proposal.proposal_id.as_str() == proposal_id)
-        .ok_or_else(|| {
-            format!(
-                "proposal {proposal_id} not found in {}",
-                issue_proposals_path(&context).display()
-            )
-        })?;
-    if has_flag(args, "--require-codex-review") {
-        require_codex_review_for_proposal(&context, &proposal_id)?;
-    }
-    agentactr_sdk::validate_issue_submission_policy(
-        &proposal,
-        allow_possible_duplicate,
-        duplicate_reason.as_deref(),
-    )?;
-    let ledger_entry = load_issue_submission_ledger(&config, issue_set_id, &proposal)?;
-    let decision = agentactr_sdk::plan_issue_submission(
-        issue_set_id,
-        proposal.clone(),
-        ledger_entry.as_ref(),
-        resume,
-    );
-    match decision {
-        IssueSubmissionDecision::AlreadyLinked => {
-            println!("proposal {proposal_id} is already linked");
-            Ok(())
-        }
-        IssueSubmissionDecision::Blocked(reason) => Err(reason),
-        IssueSubmissionDecision::RecoverSubmitted(req) => {
-            let tracker = GithubRestAdapter::new_with_github(
-                &context.artifact_dir,
-                &config.tracker,
-                &config.github,
-            );
-            let recovered = tracker.recover_created_issue_by_marker(&req)?;
-            let Some(create) = recovered else {
-                return Err(
-                    "submitted issue request is uncertain and no created issue marker was found; inspect GitHub before retrying to avoid duplicates"
-                        .to_string(),
-                );
-            };
-            let mismatches = create.metadata_mismatches();
-            if !mismatches.is_empty() {
-                record_issue_submission_state(
-                    &config,
-                    issue_set_id,
-                    &proposal,
-                    IssueSubmissionLedgerState::CreatedMetadataMismatch,
-                    Some(&create.issue),
-                    create.tracker_issue_id,
-                    &format!(
-                        "recovered created issue metadata mismatch: {}",
-                        mismatches.join(", ")
-                    ),
-                )?;
-                return Err(format!(
-                    "recovered issue {} but metadata was dropped or changed: {}; linking skipped for human review",
-                    create
-                        .issue
-                        .html_url
-                        .clone()
-                        .unwrap_or_else(|| create.issue.number.to_string()),
-                    mismatches.join(", ")
-                ));
-            }
-            record_issue_submission_state(
-                &config,
-                issue_set_id,
-                &proposal,
-                IssueSubmissionLedgerState::Created,
-                Some(&create.issue),
-                create.tracker_issue_id,
-                "recovered created issue from marker search",
-            )?;
-            let Some(parent_issue) = proposal.parent_issue else {
-                record_issue_submission_state(
-                    &config,
-                    issue_set_id,
-                    &proposal,
-                    IssueSubmissionLedgerState::Linked,
-                    Some(&create.issue),
-                    create.tracker_issue_id,
-                    "recovered top-level issue",
-                )?;
-                println!("recovered top-level issue {}", create.issue.number);
-                return Ok(());
-            };
-            let tracker_issue_id = create
-                .tracker_issue_id
-                .ok_or("recovered issue response did not include numeric GitHub issue id")?;
-            let result = tracker.link_issue(agentactr_sdk::IssueLinkRequest {
-                repo: proposal.repo.clone(),
-                parent_issue,
-                child_issue_number: create.issue.number,
-                child_issue_id: tracker_issue_id,
-            })?;
-            record_issue_submission_state(
-                &config,
-                issue_set_id,
-                &proposal,
-                if result.linked {
-                    IssueSubmissionLedgerState::Linked
-                } else {
-                    IssueSubmissionLedgerState::CreatedUnlinked
-                },
-                Some(&create.issue),
-                create.tracker_issue_id,
-                &result.detail,
-            )?;
-            println!("{}", result.detail);
-            Ok(())
-        }
-        IssueSubmissionDecision::Create(req) => {
-            let tracker = GithubRestAdapter::new_with_github(
-                &context.artifact_dir,
-                &config.tracker,
-                &config.github,
-            );
-            let capabilities = tracker.capabilities();
-            if !capabilities
-                .supported_features
-                .iter()
-                .any(|feature| feature == "issue_create")
-            {
-                return Err(
-                    "tracker adapter does not support issue_create; issue submission remains fail-closed"
-                        .to_string(),
-                );
-            }
-            ensure_issue_proposal_capabilities(&proposal, &capabilities)?;
-            if allow_possible_duplicate {
-                record_duplicate_override(
-                    &context,
-                    &proposal_id,
-                    duplicate_reason.as_deref().unwrap_or_default(),
-                )?;
-            }
-            begin_issue_submission(
-                &config,
-                issue_set_id,
-                &proposal,
-                duplicate_reason.as_deref(),
-            )?;
-            let create = tracker.create_issue(*req)?;
-            let mismatches = create.metadata_mismatches();
-            if !mismatches.is_empty() {
-                record_issue_submission_state(
-                    &config,
-                    issue_set_id,
-                    &proposal,
-                    IssueSubmissionLedgerState::CreatedMetadataMismatch,
-                    Some(&create.issue),
-                    create.tracker_issue_id,
-                    &format!("created issue metadata mismatch: {}", mismatches.join(", ")),
-                )?;
-                return Err(format!(
-                    "created issue {} but metadata was dropped or changed: {}; linking skipped for human review",
-                    create
-                        .issue
-                        .html_url
-                        .clone()
-                        .unwrap_or_else(|| create.issue.number.to_string()),
-                    mismatches.join(", ")
-                ));
-            }
-            record_issue_submission_state(
-                &config,
-                issue_set_id,
-                &proposal,
-                IssueSubmissionLedgerState::Created,
-                Some(&create.issue),
-                create.tracker_issue_id,
-                "created issue",
-            )?;
-            let Some(parent_issue) = proposal.parent_issue else {
-                record_issue_submission_state(
-                    &config,
-                    issue_set_id,
-                    &proposal,
-                    IssueSubmissionLedgerState::Linked,
-                    Some(&create.issue),
-                    create.tracker_issue_id,
-                    "created top-level issue",
-                )?;
-                println!(
-                    "created top-level issue {}",
-                    create
-                        .issue
-                        .html_url
-                        .clone()
-                        .unwrap_or_else(|| create.issue.number.to_string())
-                );
-                return Ok(());
-            };
-            let tracker_issue_id = create
-                .tracker_issue_id
-                .ok_or("created issue response did not include numeric GitHub issue id")?;
-            let link_request = agentactr_sdk::IssueLinkRequest {
-                repo: proposal.repo.clone(),
-                parent_issue,
-                child_issue_number: create.issue.number,
-                child_issue_id: tracker_issue_id,
-            };
-            let link = match tracker.link_issue(link_request) {
-                Ok(link) => link,
-                Err(err) => {
-                    record_issue_submission_state(
-                        &config,
-                        issue_set_id,
-                        &proposal,
-                        IssueSubmissionLedgerState::CreatedUnlinked,
-                        Some(&create.issue),
-                        create.tracker_issue_id,
-                        &format!("created issue but link failed: {err}"),
-                    )?;
-                    return Err(format!(
-                        "created issue {} but linking as sub-issue failed: {err}; rerun with --resume --yes after fixing the cause",
-                        create
-                            .issue
-                            .html_url
-                            .clone()
-                            .unwrap_or_else(|| create.issue.number.to_string())
-                    ));
-                }
-            };
-            record_issue_submission_state(
-                &config,
-                issue_set_id,
-                &proposal,
-                if link.linked {
-                    IssueSubmissionLedgerState::Linked
-                } else {
-                    IssueSubmissionLedgerState::CreatedUnlinked
-                },
-                Some(&create.issue),
-                create.tracker_issue_id,
-                &link.detail,
-            )?;
-            println!("{}", link.detail);
-            Ok(())
-        }
-        IssueSubmissionDecision::Link(req) => {
-            let tracker = GithubRestAdapter::new(&context.artifact_dir, &config.tracker);
-            let capabilities = tracker.capabilities();
-            if !capabilities
-                .supported_features
-                .iter()
-                .any(|feature| feature == "issue_link")
-            {
-                return Err(
-                    "tracker adapter does not support issue_link; resume remains fail-closed"
-                        .to_string(),
-                );
-            }
-            let child_issue_id = req.child_issue_id;
-            let result = tracker.link_issue(req)?;
-            record_issue_submission_state(
-                &config,
-                issue_set_id,
-                &proposal,
-                if result.linked {
-                    IssueSubmissionLedgerState::Linked
-                } else {
-                    IssueSubmissionLedgerState::CreatedUnlinked
-                },
-                None,
-                Some(child_issue_id),
-                &result.detail,
-            )?;
-            println!("{}", result.detail);
-            Ok(())
-        }
-    }
-}
-
-fn cmd_issue_mark(args: &mut [String]) -> Result<(), String> {
-    let issue_set_id = args.get(2).ok_or(
-        "usage: agentactr issue mark ISSUE_SET_ID --proposal PROPOSAL_ID --dedupe unique|duplicate_blocked --reason TEXT",
-    )?;
-    let proposal_id =
-        flag_value(args, "--proposal").ok_or("missing --proposal PROPOSAL_ID for issue mark")?;
-    let dedupe = match flag_value(args, "--dedupe").as_deref() {
-        Some("unique") => agentactr_sdk::IssueDedupeStatus::Unique,
-        Some("duplicate_blocked") => agentactr_sdk::IssueDedupeStatus::DuplicateBlocked,
-        Some(value) => return Err(format!("unsupported --dedupe `{value}`")),
-        None => return Err("missing --dedupe unique|duplicate_blocked for issue mark".to_string()),
-    };
-    let reason = flag_value(args, "--reason")
-        .filter(|reason| !reason.trim().is_empty())
-        .ok_or("issue mark requires --reason TEXT")?;
-    let config = load_agentactr_config(None)?;
-    let context = load_issue_set_context(&config, issue_set_id)?;
-    let mut proposals = load_issue_proposals(&context)?;
-    let mut found = false;
-    for proposal in &mut proposals {
-        if proposal.proposal_id.as_str() == proposal_id {
-            proposal.dedupe = dedupe;
-            proposal.provenance.push(format!(
-                "operator_dedupe_mark:{}:{}",
-                dedupe.as_str(),
-                sha256_hex_bytes(reason.as_bytes())
-            ));
-            found = true;
-            break;
-        }
-    }
-    if !found {
-        return Err(format!(
-            "proposal {proposal_id} not found in issue set {issue_set_id}"
-        ));
-    }
-    write_issue_proposals(&context, &proposals)?;
-    write_issue_dedupe_report_mark(&context, &proposals, &proposal_id, dedupe, &reason)?;
-    println!(
-        "marked proposal {} as {} in issue set {}",
-        proposal_id,
-        dedupe.as_str(),
-        issue_set_id
-    );
-    Ok(())
-}
-
-fn issue_proposals_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("issue_proposals.json")
-}
-
-fn load_issue_proposals(context: &IssueSetArtifactContext) -> Result<Vec<IssueProposal>, String> {
-    let path = issue_proposals_path(context);
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let text = fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let value = serde_json::from_str::<serde_json::Value>(&text)
-        .map_err(|e| format!("parse {}: {e}", path.display()))?;
-    let proposals = value
-        .get("proposals")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .or_else(|| value.as_array().cloned())
-        .ok_or_else(|| {
-            format!(
-                "{} must be an array or object with proposals array",
-                path.display()
-            )
-        })?;
-    proposals
-        .iter()
-        .map(|proposal| parse_issue_proposal(proposal, context))
-        .collect()
-}
-
-fn parse_issue_proposal(
-    value: &serde_json::Value,
-    context: &IssueSetArtifactContext,
-) -> Result<IssueProposal, String> {
-    let proposal_id = json_required_str(value, "proposal_id")?;
-    let title = json_required_str(value, "title")?;
-    let body = json_required_str(value, "body")?;
-    let digest = value
-        .get("digest")
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string)
-        .unwrap_or_else(|| sha256_hex_bytes(format!("{title}\n{body}").as_bytes()));
-    Ok(IssueProposal {
-        proposal_id: IssueProposalId::new(proposal_id),
-        repo: value
-            .get("repo")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or(&context.repo)
-            .to_string(),
-        parent_issue: value
-            .get("parent_issue")
-            .and_then(serde_json::Value::as_u64)
-            .or(context.parent_issue),
-        title,
-        body,
-        labels: json_string_array(value, "labels"),
-        assignees: json_string_array(value, "assignees"),
-        milestone: value
-            .get("milestone")
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string),
-        issue_type: value
-            .get("issue_type")
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string),
-        issue_field_values: parse_issue_field_values(value)?,
-        project_fields: parse_issue_project_fields(value)?,
-        digest,
-        dedupe: parse_issue_dedupe(value),
-        framework: parse_issue_framework(value),
-        related_issues: json_string_array(value, "related_issues")
-            .into_iter()
-            .map(IssueId)
-            .collect(),
-        provenance: json_string_array(value, "provenance"),
-    })
-}
-
-fn load_issue_set_context(
-    config: &AgentactrConfig,
-    issue_set_id: &str,
-) -> Result<IssueSetArtifactContext, String> {
-    if let Ok(context) = load_issue_set_manifest_context(config, issue_set_id) {
-        return Ok(context);
-    }
-    let run = load_run_artifact_context(config, issue_set_id)?;
-    Ok(run_artifact_as_issue_set(&run))
-}
-
-fn run_artifact_as_issue_set(run: &RunArtifactContext) -> IssueSetArtifactContext {
-    IssueSetArtifactContext {
-        schema_version: 1,
-        artifact_format_version: 1,
-        issue_set_id: run.run_id.clone(),
-        compat_run_id: Some(run.run_id.clone()),
-        created_at: String::new(),
-        producer: "agentactr-run-legacy".to_string(),
-        source: IssueSetSource::RunLegacy,
-        repo: run.repo.clone(),
-        parent_issue: run.issue.parse::<u64>().ok(),
-        framework: None,
-        artifact_dir: run.artifact_dir.clone(),
-        manifest_path: run.manifest_path.clone(),
-        candidates_path: run.artifact_dir.join("issue_candidates.json"),
-        proposals_path: run.artifact_dir.join("issue_proposals.json"),
-        dedupe_report_path: run.artifact_dir.join("issue_dedupe_report.json"),
-        planner_prompt_path: None,
-        planner_metadata_path: None,
-        trace_path: run.artifact_dir.join("trace.issue_set.jsonl"),
-    }
-}
-
-fn load_issue_set_manifest_context(
-    config: &AgentactrConfig,
-    issue_set_id: &str,
-) -> Result<IssueSetArtifactContext, String> {
-    validate_run_id(issue_set_id)?;
-    let artifact_dir = issue_set_artifact_dir(config, issue_set_id)?;
-    let manifest_path = artifact_dir.join("issue_set_manifest.json");
-    let text = fs::read_to_string(&manifest_path)
-        .map_err(|e| format!("read issue set manifest {}: {e}", manifest_path.display()))?;
-    let manifest = serde_json::from_str::<serde_json::Value>(&text)
-        .map_err(|e| format!("parse issue set manifest {}: {e}", manifest_path.display()))?;
-    let manifest_id = json_required_str(&manifest, "issue_set_id")?;
-    if manifest_id != issue_set_id {
-        return Err(format!(
-            "issue set manifest {} is for `{manifest_id}`, not `{issue_set_id}`",
-            manifest_path.display()
-        ));
-    }
-    let repo = json_required_str(&manifest, "repo")?;
-    let source = match manifest
-        .get("source")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("run_legacy")
-    {
-        "find" => IssueSetSource::Find,
-        "draft" => IssueSetSource::Draft,
-        _ => IssueSetSource::RunLegacy,
-    };
-    Ok(IssueSetArtifactContext {
-        schema_version: manifest
-            .get("schema_version")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(1) as u32,
-        artifact_format_version: manifest
-            .get("artifact_format_version")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(1) as u32,
-        issue_set_id: issue_set_id.to_string(),
-        compat_run_id: manifest
-            .get("compat_run_id")
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string),
-        created_at: manifest
-            .get("created_at")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        producer: manifest
-            .get("producer")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("agentactr-cli")
-            .to_string(),
-        source,
-        repo,
-        parent_issue: manifest
-            .get("parent_issue")
-            .and_then(serde_json::Value::as_u64),
-        framework: manifest.get("framework").and_then(parse_framework_value),
-        artifact_dir: artifact_dir.clone(),
-        manifest_path,
-        candidates_path: artifact_dir.join("issue_candidates.json"),
-        proposals_path: artifact_dir.join("issue_proposals.json"),
-        dedupe_report_path: artifact_dir.join("issue_dedupe_report.json"),
-        planner_prompt_path: manifest
-            .get("planner_prompt_path")
-            .and_then(serde_json::Value::as_str)
-            .map(PathBuf::from),
-        planner_metadata_path: manifest
-            .get("planner_metadata_path")
-            .and_then(serde_json::Value::as_str)
-            .map(PathBuf::from),
-        trace_path: artifact_dir.join("trace.issue_set.jsonl"),
-    })
-}
-
-fn issue_set_artifact_dir(config: &AgentactrConfig, issue_set_id: &str) -> Result<PathBuf, String> {
-    validate_run_id(issue_set_id)?;
-    Ok(resolve_config_path(&config.observability.artifact_root)?
-        .join("issues")
-        .join(issue_set_id))
-}
-
-fn create_issue_set_context(
-    config: &AgentactrConfig,
-    issue_set_id: &str,
-    repo: &str,
-    parent_issue: Option<u64>,
-    framework: Option<agentactr_sdk::FrameworkDeclaration>,
-    source: IssueSetSource,
-) -> Result<IssueSetArtifactContext, String> {
-    let artifact_dir = issue_set_artifact_dir(config, issue_set_id)?;
-    create_dir(&artifact_dir)?;
-    Ok(IssueSetArtifactContext {
-        schema_version: 1,
-        artifact_format_version: 1,
-        issue_set_id: issue_set_id.to_string(),
-        compat_run_id: None,
-        created_at: timestamp_rfc3339_millis(),
-        producer: "agentactr-cli".to_string(),
-        source,
-        repo: repo.to_string(),
-        parent_issue,
-        framework,
-        manifest_path: artifact_dir.join("issue_set_manifest.json"),
-        candidates_path: artifact_dir.join("issue_candidates.json"),
-        proposals_path: artifact_dir.join("issue_proposals.json"),
-        dedupe_report_path: artifact_dir.join("issue_dedupe_report.json"),
-        planner_prompt_path: None,
-        planner_metadata_path: None,
-        trace_path: artifact_dir.join("trace.issue_set.jsonl"),
-        artifact_dir,
-    })
-}
-
-fn write_issue_set_manifest(
-    context: &IssueSetArtifactContext,
-    _config: &AgentactrConfig,
-    stack: Option<&str>,
-) -> Result<(), String> {
-    let codex_review_status_path = codex_issue_review_status_path(context);
-    let codex_review_markdown_path = codex_issue_review_markdown_path(context);
-    let manifest = serde_json::json!({
-        "schema_version": context.schema_version,
-        "artifact_format_version": context.artifact_format_version,
-        "issue_set_id": context.issue_set_id,
-        "compat_run_id": context.compat_run_id,
-        "created_at": context.created_at,
-        "producer": context.producer,
-        "source": context.source.as_str(),
-        "repo": context.repo,
-        "parent_issue": context.parent_issue,
-        "stack": stack,
-        "framework": context.framework.as_ref().map(framework_to_json),
-        "candidates_path": context.candidates_path,
-        "proposals_path": context.proposals_path,
-        "dedupe_report_path": context.dedupe_report_path,
-        "planner_prompt_path": context.planner_prompt_path,
-        "planner_metadata_path": context.planner_metadata_path,
-        "codex_review_status_path": codex_review_status_path.exists().then_some(codex_review_status_path),
-        "codex_review_markdown_path": codex_review_markdown_path.exists().then_some(codex_review_markdown_path),
-        "trace_path": context.trace_path,
-    });
-    write_file(
-        &context.manifest_path,
-        &serde_json::to_string_pretty(&manifest)
-            .map_err(|e| format!("render issue set manifest: {e}"))?,
-    )
-}
-
-fn write_issue_candidates(
-    context: &IssueSetArtifactContext,
-    candidates: &[agentactr_sdk::Issue],
-) -> Result<(), String> {
-    let items = candidates
-        .iter()
-        .map(issue_to_json)
-        .collect::<Vec<serde_json::Value>>();
-    let value = serde_json::json!({
-        "issue_set_id": context.issue_set_id,
-        "repo": context.repo,
-        "candidate_count": candidates.len(),
-        "candidates": items,
-    });
-    write_file(
-        &context.candidates_path,
-        &serde_json::to_string_pretty(&value)
-            .map_err(|e| format!("render issue candidates: {e}"))?,
-    )
-}
-
-fn write_issue_proposals(
-    context: &IssueSetArtifactContext,
-    proposals: &[IssueProposal],
-) -> Result<(), String> {
-    let items = proposals
-        .iter()
-        .map(issue_proposal_to_json)
-        .collect::<Vec<serde_json::Value>>();
-    let value = serde_json::json!({
-        "issue_set_id": context.issue_set_id,
-        "repo": context.repo,
-        "proposal_count": proposals.len(),
-        "proposals": items,
-    });
-    write_file(
-        &context.proposals_path,
-        &serde_json::to_string_pretty(&value)
-            .map_err(|e| format!("render issue proposals: {e}"))?,
-    )
-}
-
-fn write_issue_dedupe_report(
-    context: &IssueSetArtifactContext,
-    proposals: &[IssueProposal],
-    candidates: &[agentactr_sdk::Issue],
-) -> Result<(), String> {
-    let value = serde_json::json!({
-        "issue_set_id": context.issue_set_id,
-        "normalization": {
-            "title": "trim, unicode-preserving lowercase, collapse ascii whitespace",
-            "version": 1
-        },
-        "candidate_count": candidates.len(),
-        "proposals": proposals.iter().map(|proposal| serde_json::json!({
-            "proposal_id": proposal.proposal_id.as_str(),
-            "dedupe": proposal.dedupe.as_str(),
-            "related_issues": proposal.related_issues.iter().map(|id| id.0.clone()).collect::<Vec<_>>(),
-        })).collect::<Vec<_>>(),
-    });
-    write_file(
-        &context.dedupe_report_path,
-        &serde_json::to_string_pretty(&value)
-            .map_err(|e| format!("render issue dedupe report: {e}"))?,
-    )
-}
-
-fn write_issue_dedupe_report_mark(
-    context: &IssueSetArtifactContext,
-    proposals: &[IssueProposal],
-    proposal_id: &str,
-    dedupe: agentactr_sdk::IssueDedupeStatus,
-    reason: &str,
-) -> Result<(), String> {
-    let value = serde_json::json!({
-        "issue_set_id": context.issue_set_id,
-        "normalization": {
-            "title": "trim, unicode-preserving lowercase, collapse ascii whitespace",
-            "version": 1
-        },
-        "candidate_count": null,
-        "operator_override": {
-            "proposal_id": proposal_id,
-            "dedupe": dedupe.as_str(),
-            "reason_sha256": sha256_hex_bytes(reason.as_bytes()),
-        },
-        "proposals": proposals.iter().map(|proposal| serde_json::json!({
-            "proposal_id": proposal.proposal_id.as_str(),
-            "dedupe": proposal.dedupe.as_str(),
-            "related_issues": proposal.related_issues.iter().map(|id| id.0.clone()).collect::<Vec<_>>(),
-        })).collect::<Vec<_>>(),
-    });
-    write_file(
-        &context.dedupe_report_path,
-        &serde_json::to_string_pretty(&value)
-            .map_err(|e| format!("render issue dedupe report: {e}"))?,
-    )
-}
-
-fn record_duplicate_override(
-    context: &IssueSetArtifactContext,
-    proposal_id: &str,
-    reason: &str,
-) -> Result<(), String> {
-    if reason.trim().is_empty() {
-        return Ok(());
-    }
-    let path = context.artifact_dir.join("issue_duplicate_override.json");
-    let value = serde_json::json!({
-        "issue_set_id": context.issue_set_id,
-        "proposal_id": proposal_id,
-        "reason_sha256": sha256_hex_bytes(reason.as_bytes()),
-        "reason_recorded": true,
-    });
-    write_file(
-        path,
-        &serde_json::to_string_pretty(&value)
-            .map_err(|e| format!("render duplicate override: {e}"))?,
-    )
-}
-
-fn issue_to_json(issue: &agentactr_sdk::Issue) -> serde_json::Value {
-    serde_json::json!({
-        "id": issue.id,
-        "repo": issue.repo,
-        "number": issue.number,
-        "title": issue.title,
-        "body": issue.body,
-        "state": issue.state,
-        "author": issue.author,
-        "labels": issue.labels,
-        "created_at": issue.created_at,
-        "updated_at": issue.updated_at,
-        "is_pull_request": issue.is_pull_request,
-        "html_url": issue.html_url,
-    })
-}
-
-fn issue_proposal_to_json(proposal: &IssueProposal) -> serde_json::Value {
-    serde_json::json!({
-        "proposal_id": proposal.proposal_id.as_str(),
-        "repo": proposal.repo,
-        "parent_issue": proposal.parent_issue,
-        "title": proposal.title,
-        "body": proposal.body,
-        "labels": proposal.labels,
-        "assignees": proposal.assignees,
-        "milestone": proposal.milestone,
-        "issue_type": proposal.issue_type,
-        "issue_field_values": proposal.issue_field_values.iter().map(|field| serde_json::json!({
-            "field_id": field.field_id,
-            "value": field.value,
-            "type": field.value_type,
-        })).collect::<Vec<_>>(),
-        "project_fields": proposal.project_fields.iter().map(|field| serde_json::json!({
-            "field_name": field.field_name,
-            "value": field.value,
-        })).collect::<Vec<_>>(),
-        "digest": proposal.digest,
-        "dedupe": proposal.dedupe.as_str(),
-        "framework": proposal.framework.as_ref().map(|framework| serde_json::json!({
-            "ecosystem": framework.ecosystem,
-            "id": framework.id,
-            "version_or_profile": framework.version_or_profile,
-        })),
-        "related_issues": proposal.related_issues.iter().map(|id| id.0.clone()).collect::<Vec<_>>(),
-        "provenance": proposal.provenance,
-    })
-}
-
-fn parse_candidate_query(
-    args: &[String],
-    repo: &str,
-) -> Result<agentactr_sdk::CandidateQuery, String> {
-    let state = match flag_value(args, "--state").as_deref().unwrap_or("open") {
-        "open" => agentactr_sdk::CandidateState::Open,
-        "closed" => agentactr_sdk::CandidateState::Closed,
-        "all" => agentactr_sdk::CandidateState::All,
-        value => return Err(format!("unsupported --state `{value}`")),
-    };
-    let limit = flag_value(args, "--limit")
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(50)
-        .clamp(1, 1000);
-    let per_page = flag_value(args, "--per-page")
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(50)
-        .clamp(1, 100);
-    let page = flag_value(args, "--page")
-        .map(|value| {
-            value
-                .parse::<u32>()
-                .map_err(|_| format!("invalid --page `{value}`"))
-        })
-        .transpose()?;
-    let sort = match flag_value(args, "--sort").as_deref().unwrap_or("updated") {
-        "created" => agentactr_sdk::CandidateSort::Created,
-        "updated" => agentactr_sdk::CandidateSort::Updated,
-        "comments" => agentactr_sdk::CandidateSort::Comments,
-        value => return Err(format!("unsupported --sort `{value}`")),
-    };
-    let direction = match flag_value(args, "--direction").as_deref().unwrap_or("desc") {
-        "asc" => agentactr_sdk::SortDirection::Asc,
-        "desc" => agentactr_sdk::SortDirection::Desc,
-        value => return Err(format!("unsupported --direction `{value}`")),
-    };
-    Ok(agentactr_sdk::CandidateQuery {
-        repo: repo.to_string(),
-        state,
-        labels: flag_values(args, "--label"),
-        assignee: flag_value(args, "--assignee"),
-        author: flag_value(args, "--author"),
-        since: flag_value(args, "--since"),
-        text_query: flag_value(args, "--query").or_else(|| flag_value(args, "--search")),
-        include_pull_requests: has_flag(args, "--include-pull-requests"),
-        sort,
-        direction,
-        page,
-        limit,
-        per_page,
-    })
-}
-
-fn apply_issue_artifact_root_override(
-    config: &mut AgentactrConfig,
-    args: &[String],
-) -> Result<(), String> {
-    if let Some(root) = flag_value(args, "--artifact-root") {
-        if root.trim().is_empty() {
-            return Err("--artifact-root cannot be empty".to_string());
-        }
-        config.observability.artifact_root = root;
-    }
-    Ok(())
-}
-
-fn load_issue_draft_prompt(args: &[String]) -> Result<Option<String>, String> {
-    let prompt = flag_value(args, "--prompt");
-    let prompt_file = flag_value(args, "--prompt-file");
-    match (prompt, prompt_file) {
-        (Some(_), Some(_)) => Err("use either --prompt or --prompt-file, not both".to_string()),
-        (Some(prompt), None) => Ok(Some(prompt)),
-        (None, Some(path)) => {
-            let text = fs::read_to_string(&path)
-                .map_err(|e| format!("read issue draft prompt file {path}: {e}"))?;
-            Ok(Some(text))
-        }
-        (None, None) => Ok(None),
-    }
-}
-
-fn selected_repo_stack_name(config: &AgentactrConfig) -> Option<String> {
-    let value = config.repository.declared_primary_stack.trim();
-    if value.is_empty() || value == "auto" {
-        None
-    } else {
-        Some(value.to_string())
-    }
-}
-
-fn discovered_repo_stack_name(inspection: &RepoInspection) -> Option<String> {
-    match inspection.primary_stack {
-        StackKind::TypeScript | StackKind::Rust | StackKind::Golang | StackKind::Python => {
-            Some(inspection.primary_stack.as_str().to_string())
-        }
-        StackKind::Mixed | StackKind::Unknown => None,
-    }
-}
-
-fn parse_framework_declaration(
-    value: Option<&str>,
-) -> Result<Option<agentactr_sdk::FrameworkDeclaration>, String> {
-    let Some(value) = value else {
-        return Ok(None);
-    };
-    match value {
-        "none" => Ok(None),
-        "nextjs" => Ok(Some(agentactr_sdk::FrameworkDeclaration {
-            ecosystem: "typescript".to_string(),
-            id: "nextjs".to_string(),
-            version_or_profile: None,
-        })),
-        other => Err(format!(
-            "unsupported --framework `{other}`; expected nextjs or none"
-        )),
-    }
-}
-
-struct PromptArtifacts {
-    redacted_path: PathBuf,
-    metadata_path: PathBuf,
-}
-
-fn write_prompt_artifacts(
-    context: &IssueSetArtifactContext,
-    prompt: &str,
-) -> Result<PromptArtifacts, String> {
-    let metadata_path = context.artifact_dir.join("planner_prompt_metadata.json");
-    let redacted_path = context.artifact_dir.join("planner_prompt.redacted.txt");
-    let metadata = serde_json::json!({
-        "issue_set_id": context.issue_set_id,
-        "prompt_sha256": sha256_hex_bytes(prompt.as_bytes()),
-        "prompt_bytes": prompt.len(),
-        "prompt_chars": prompt.chars().count(),
-        "source_kind": "inline_or_file",
-        "raw_prompt_persisted": false,
-        "redaction_policy": "redacted prompt only; raw prompt persistence is disabled by default",
-        "redacted_prompt_path": redacted_path,
-    });
-    write_file(
-        &metadata_path,
-        &serde_json::to_string_pretty(&metadata)
-            .map_err(|e| format!("render prompt metadata: {e}"))?,
-    )?;
-    write_file(&redacted_path, &redact_prompt(prompt))?;
-    Ok(PromptArtifacts {
-        redacted_path,
-        metadata_path,
-    })
-}
-
-fn redact_prompt(prompt: &str) -> String {
-    prompt
-        .lines()
-        .map(|line| {
-            if line.contains("TOKEN=")
-                || line.contains("KEY=")
-                || line.to_ascii_lowercase().contains("secret")
-            {
-                "[redacted]"
-            } else {
-                line
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn write_planner_metadata(
-    context: &IssueSetArtifactContext,
-    draft: &agentactr_sdk::IssueDraftResult,
-    planner: &str,
-) -> Result<(), String> {
-    if let Some(path) = context.planner_metadata_path.as_ref() {
-        let value = serde_json::json!({
-            "issue_set_id": context.issue_set_id,
-            "planner": planner,
-            "schema_validated": true,
-            "discarded_partial_output": draft.discarded_partial_output,
-            "proposal_count": draft.proposals.len(),
-            "detail": draft.detail,
-            "planner_prompt_path": context.planner_prompt_path,
-            "planner_prompt_metadata_path": context.artifact_dir.join("planner_prompt_metadata.json"),
-            "capabilities": {
-                "read_only": true,
-                "github_mutation": false,
-                "worktree_creation": false,
-                "source_mutation": false,
-                "quality_gates": false
-            }
-        });
-        write_file(
-            path,
-            &serde_json::to_string_pretty(&value)
-                .map_err(|e| format!("render planner metadata: {e}"))?,
-        )?;
-    }
-    Ok(())
-}
-
-struct CodexIssueReviewArtifacts {
-    status_path: PathBuf,
-    review_path: PathBuf,
-}
-
-struct CodexIssueDraftArtifacts {
-    status_path: PathBuf,
-    response_path: PathBuf,
-}
-
-struct CodexIssueDraftStatusPaths<'a> {
-    prompt_path: &'a Path,
-    schema_path: &'a Path,
-    response_path: &'a Path,
-    stdout_path: &'a Path,
-    stderr_path: &'a Path,
-}
-
-fn codex_issue_draft_status_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("codex_issue_draft_status.json")
-}
-
-fn codex_issue_draft_response_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("codex_issue_draft_response.json")
-}
-
-fn codex_issue_draft_stdout_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("codex_issue_draft.stdout.jsonl")
-}
-
-fn codex_issue_draft_stderr_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("codex_issue_draft.stderr.log")
-}
-
-fn codex_issue_draft_prompt_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("codex_issue_draft_prompt.txt")
-}
-
-fn codex_issue_draft_schema_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("codex_issue_draft_schema.json")
-}
-
-fn codex_issue_review_status_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("codex_issue_review_status.json")
-}
-
-fn codex_issue_review_markdown_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("codex_issue_review.md")
-}
-
-fn codex_issue_review_stdout_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("codex_issue_review.stdout.jsonl")
-}
-
-fn codex_issue_review_stderr_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("codex_issue_review.stderr.log")
-}
-
-fn codex_issue_review_prompt_path(context: &IssueSetArtifactContext) -> PathBuf {
-    context.artifact_dir.join("codex_issue_review_prompt.txt")
-}
-
-fn run_codex_issue_draft_planner(
-    config: &AgentactrConfig,
-    context: &IssueSetArtifactContext,
-    draft_request: &agentactr_sdk::IssueDraftRequest,
-    operator_prompt: &str,
-    stack: &str,
-    local_inspection: &RepoInspection,
-) -> Result<CodexIssueDraftArtifacts, String> {
-    require_codex_exec_auth(&config.codex.command, &config.codex.openai_api_key_env)?;
-    let prompt_path = codex_issue_draft_prompt_path(context);
-    let schema_path = codex_issue_draft_schema_path(context);
-    let response_path = codex_issue_draft_response_path(context);
-    let stdout_path = codex_issue_draft_stdout_path(context);
-    let stderr_path = codex_issue_draft_stderr_path(context);
-    let status_path = codex_issue_draft_status_path(context);
-    write_file(&schema_path, &codex_issue_draft_schema())?;
-    let prompt = codex_issue_draft_prompt(
-        context,
-        draft_request,
-        operator_prompt,
-        stack,
-        local_inspection,
-    )?;
-    write_file(&prompt_path, &prompt)?;
-    let mut command = Command::new(&config.codex.command);
-    command
-        .arg("exec")
-        .arg("--json")
-        .arg("--sandbox")
-        .arg("read-only")
-        .arg("-c")
-        .arg("approval_policy=\"never\"")
-        .arg("--cd")
-        .arg(".")
-        .arg("--output-schema")
-        .arg(&schema_path)
-        .arg("--output-last-message")
-        .arg(&response_path);
-    append_codex_project_profile_overrides(&mut command, Path::new("."), &config.codex.profile)?;
-    command
-        .arg(prompt)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    forward_codex_api_key_env(&mut command, &config.codex.openai_api_key_env);
-    let output = run_command_capture_timeout(command, Duration::from_secs(10 * 60))?;
-    write_file(&stdout_path, &output.stdout)?;
-    write_file(&stderr_path, &output.stderr)?;
-    if !output.status.success() {
-        let diagnostic = format!("{}\n{}", output.stdout, output.stderr);
-        write_codex_issue_draft_status(
-            context,
-            "failed",
-            CodexIssueDraftStatusPaths {
-                prompt_path: &prompt_path,
-                schema_path: &schema_path,
-                response_path: &response_path,
-                stdout_path: &stdout_path,
-                stderr_path: &stderr_path,
-            },
-            Some(&classify_codex_exec_failure(&diagnostic)),
-        )?;
-        return Err(format!(
-            "Codex issue draft failed: {}",
-            classify_codex_exec_failure(&diagnostic)
-        ));
-    }
-    if codex_probe_output_has_error_event(&output.stdout) {
-        write_codex_issue_draft_status(
-            context,
-            "failed",
-            CodexIssueDraftStatusPaths {
-                prompt_path: &prompt_path,
-                schema_path: &schema_path,
-                response_path: &response_path,
-                stdout_path: &stdout_path,
-                stderr_path: &stderr_path,
-            },
-            Some("Codex issue draft emitted an error event"),
-        )?;
-        return Err(format!(
-            "Codex issue draft emitted an error event; stdout_jsonl={}",
-            stdout_path.display()
-        ));
-    }
-    let raw_response = fs::read_to_string(&response_path)
-        .map_err(|e| format!("read Codex issue draft {}: {e}", response_path.display()))?;
-    agentactr_sdk::draft_issue_proposals_from_structured_json(
-        draft_request.clone(),
-        &raw_response,
-        "codex_read_only_structured_issue_draft_planner",
-    )
-    .map_err(|e| format!("Codex issue draft output failed schema validation: {e}"))?;
-    write_codex_issue_draft_status(
-        context,
-        "schema_valid",
-        CodexIssueDraftStatusPaths {
-            prompt_path: &prompt_path,
-            schema_path: &schema_path,
-            response_path: &response_path,
-            stdout_path: &stdout_path,
-            stderr_path: &stderr_path,
-        },
-        None,
-    )?;
-    Ok(CodexIssueDraftArtifacts {
-        status_path,
-        response_path,
-    })
-}
-
-fn write_codex_issue_draft_status(
-    context: &IssueSetArtifactContext,
-    status: &str,
-    paths: CodexIssueDraftStatusPaths<'_>,
-    error: Option<&str>,
-) -> Result<(), String> {
-    let value = serde_json::json!({
-        "schema_version": "0.1",
-        "issue_set_id": context.issue_set_id,
-        "status": status,
-        "planner": "codex_read_only_structured_issue_draft_planner",
-        "prompt_path": paths.prompt_path,
-        "schema_path": paths.schema_path,
-        "response_path": paths.response_path,
-        "stdout_jsonl_path": paths.stdout_path,
-        "stderr_log_path": paths.stderr_path,
-        "read_only": true,
-        "github_mutation": false,
-        "workspace_mutation": false,
-        "error": error,
-    });
-    write_file(
-        codex_issue_draft_status_path(context),
-        &serde_json::to_string_pretty(&value)
-            .map_err(|e| format!("render Codex issue draft status: {e}"))?,
-    )
-}
-
-fn codex_issue_draft_prompt(
-    context: &IssueSetArtifactContext,
-    draft_request: &agentactr_sdk::IssueDraftRequest,
-    operator_prompt: &str,
-    stack: &str,
-    local_inspection: &RepoInspection,
-) -> Result<String, String> {
-    let candidates_json = serde_json::to_string_pretty(
-        &draft_request
-            .candidates
-            .iter()
-            .take(25)
-            .map(|issue| {
-                serde_json::json!({
-                    "id": issue.id,
-                    "repo": issue.repo,
-                    "number": issue.number,
-                    "title": issue.title,
-                    "state": issue.state,
-                    "labels": issue.labels,
-                })
-            })
-            .collect::<Vec<_>>(),
-    )
-    .map_err(|e| format!("render issue candidate context: {e}"))?;
-    let evidence_files = local_inspection
-        .evidence_files
-        .iter()
-        .take(80)
-        .cloned()
-        .collect::<Vec<_>>();
-    let evidence_json = serde_json::to_string_pretty(&serde_json::json!({
-        "detected_stack": local_inspection.primary_stack.as_str(),
-        "confidence": local_inspection.confidence,
-        "is_empty": local_inspection.is_empty,
-        "evidence_files": evidence_files,
-    }))
-    .map_err(|e| format!("render repository evidence context: {e}"))?;
-    Ok(format!(
-        r#"You are a read-only GitHub issue drafting planner for agentactr.
-
-Repository: {repo}
-Stack: {stack}
-Framework: {framework}
-Issue set: {issue_set_id}
-Parent issue: {parent_issue}
-
-Operator request:
-{operator_prompt}
-
-Current repository evidence:
-```json
-{evidence_json}
-```
-
-Existing issue candidates for dedupe context:
-```json
-{candidates_json}
-```
-
-Strict rules:
-- Inspect the current checkout read-only before drafting.
-- Do not modify files.
-- Do not create GitHub issues.
-- Do not run implementation work.
-- Do not assume the repository is blank when files/routes/packages already exist.
-- Draft small, independently implementable issues that are specific to the current repository state.
-- Avoid generic architecture/bootstrap issues unless repository evidence proves the gap exists.
-- Prefer concrete missing operations, consistency fixes, guard/authorization gaps, tests, observability gaps, or UI/API parity gaps.
-- Return `labels`, `assignees`, and `provenance` as arrays. Use empty arrays when no values are appropriate.
-- Return `milestone` and `issue_type` as strings or null. Use null when not explicitly requested.
-- Return `project_fields` only for explicit ProjectV2 metadata. Use `Priority` values `P0`, `P1`, or `P2`; use `Size` values `XS`, `S`, `M`, `L`, or `XL`.
-- Return only JSON matching the provided output schema.
-
-Each proposal body must include:
-- Problem
-- Scope
-- Acceptance criteria
-- Suggested files or areas to inspect
-- Out-of-scope notes when useful
-"#,
-        repo = context.repo,
-        stack = stack,
-        framework = context
-            .framework
-            .as_ref()
-            .map(|framework| format!("{}/{}", framework.ecosystem, framework.id))
-            .unwrap_or_else(|| "none".to_string()),
-        issue_set_id = context.issue_set_id,
-        parent_issue = context
-            .parent_issue
-            .map(|issue| format!("#{issue}"))
-            .unwrap_or_else(|| "none".to_string()),
-    ))
-}
-
-fn codex_issue_draft_schema() -> String {
-    serde_json::to_string_pretty(&serde_json::json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["proposals"],
-        "properties": {
-            "proposals": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 50,
-                "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                        "title",
-                        "body",
-                        "labels",
-                        "assignees",
-                        "milestone",
-                        "issue_type",
-                        "project_fields",
-                        "provenance"
-                    ],
-                    "properties": {
-                        "title": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 180
-                        },
-                        "body": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 60000
-                        },
-                        "labels": {
-                            "type": "array",
-                            "items": { "type": "string", "maxLength": 50 },
-                            "maxItems": 50
-                        },
-                        "assignees": {
-                            "type": "array",
-                            "items": { "type": "string", "maxLength": 100 },
-                            "maxItems": 20
-                        },
-                        "milestone": {
-                            "type": ["string", "null"],
-                            "maxLength": 100
-                        },
-                        "issue_type": {
-                            "type": ["string", "null"],
-                            "maxLength": 100
-                        },
-                        "project_fields": {
-                            "type": "array",
-                            "maxItems": 20,
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": false,
-                                "required": ["field_name", "value"],
-                                "properties": {
-                                    "field_name": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 80
-                                    },
-                                    "value": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 80
-                                    }
-                                }
-                            }
-                        },
-                        "provenance": {
-                            "type": "array",
-                            "items": { "type": "string", "maxLength": 200 },
-                            "maxItems": 20
-                        }
-                    }
-                }
-            }
-        }
-    }))
-    .expect("static Codex issue draft schema renders")
-}
-
-fn run_codex_issue_draft_review(
-    config: &AgentactrConfig,
-    context: &IssueSetArtifactContext,
-    proposals: &[IssueProposal],
-    stack: &str,
-) -> Result<CodexIssueReviewArtifacts, String> {
-    require_codex_exec_auth(&config.codex.command, &config.codex.openai_api_key_env)?;
-    let prompt_path = codex_issue_review_prompt_path(context);
-    let review_path = codex_issue_review_markdown_path(context);
-    let stdout_path = codex_issue_review_stdout_path(context);
-    let stderr_path = codex_issue_review_stderr_path(context);
-    let status_path = codex_issue_review_status_path(context);
-    let proposal_json = serde_json::to_string_pretty(
-        &proposals
-            .iter()
-            .map(issue_proposal_to_json)
-            .collect::<Vec<_>>(),
-    )
-    .map_err(|e| format!("render issue proposals for Codex review: {e}"))?;
-    let prompt = format!(
-        r#"You are a read-only issue proposal reviewer for agentactr.
-
-Repository: {repo}
-Stack: {stack}
-Framework: {framework}
-Issue set: {issue_set_id}
-
-Review the proposed GitHub issues against the current repository checkout.
-
-Strict rules:
-- Do not modify files.
-- Do not create GitHub issues.
-- Do not run implementation work.
-- Use read-only inspection only.
-- Check whether the proposals are specific, actionable, and appropriate for this repository.
-- If proposals are acceptable for GitHub creation, your final answer must include exactly this line: VERDICT: APPROVED
-- If any proposal should not be created, use: VERDICT: NEEDS_REVISION
-- Include proposal IDs and concise reasons.
-
-Proposals JSON:
-```json
-{proposal_json}
-```
-"#,
-        repo = context.repo,
-        stack = stack,
-        framework = context
-            .framework
-            .as_ref()
-            .map(|framework| format!("{}/{}", framework.ecosystem, framework.id))
-            .unwrap_or_else(|| "none".to_string()),
-        issue_set_id = context.issue_set_id,
-    );
-    write_file(&prompt_path, &prompt)?;
-    let mut command = Command::new(&config.codex.command);
-    command
-        .arg("exec")
-        .arg("--json")
-        .arg("--sandbox")
-        .arg("read-only")
-        .arg("-c")
-        .arg("approval_policy=\"never\"")
-        .arg("--cd")
-        .arg(".")
-        .arg("--output-last-message")
-        .arg(&review_path);
-    append_codex_project_profile_overrides(&mut command, Path::new("."), &config.codex.profile)?;
-    command
-        .arg(prompt)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    forward_codex_api_key_env(&mut command, &config.codex.openai_api_key_env);
-    let output = run_command_capture_timeout(command, Duration::from_secs(10 * 60))?;
-    write_file(&stdout_path, &output.stdout)?;
-    write_file(&stderr_path, &output.stderr)?;
-    if !output.status.success() {
-        let diagnostic = format!("{}\n{}", output.stdout, output.stderr);
-        return Err(format!(
-            "Codex proposal review failed: {}",
-            classify_codex_exec_failure(&diagnostic)
-        ));
-    }
-    if codex_probe_output_has_error_event(&output.stdout) {
-        return Err(format!(
-            "Codex proposal review emitted an error event; stdout_jsonl={}",
-            stdout_path.display()
-        ));
-    }
-    let review = fs::read_to_string(&review_path)
-        .map_err(|e| format!("read Codex issue review {}: {e}", review_path.display()))?;
-    if !review.contains("VERDICT: APPROVED") {
-        write_codex_issue_review_status(
-            context,
-            proposals,
-            "needs_revision",
-            &prompt_path,
-            &review_path,
-            &stdout_path,
-            &stderr_path,
-        )?;
-        return Err(format!(
-            "Codex proposal review did not approve issue creation; inspect {}",
-            review_path.display()
-        ));
-    }
-    write_codex_issue_review_status(
-        context,
-        proposals,
-        "approved",
-        &prompt_path,
-        &review_path,
-        &stdout_path,
-        &stderr_path,
-    )?;
-    Ok(CodexIssueReviewArtifacts {
-        status_path,
-        review_path,
-    })
-}
-
-fn write_codex_issue_review_status(
-    context: &IssueSetArtifactContext,
-    proposals: &[IssueProposal],
-    status: &str,
-    prompt_path: &Path,
-    review_path: &Path,
-    stdout_path: &Path,
-    stderr_path: &Path,
-) -> Result<(), String> {
-    let value = serde_json::json!({
-        "issue_set_id": context.issue_set_id,
-        "reviewer": "codex-cli-json",
-        "status": status,
-        "sandbox": "read-only",
-        "approval_policy": "never",
-        "reviewed_proposal_ids": proposals.iter().map(|proposal| proposal.proposal_id.as_str()).collect::<Vec<_>>(),
-        "prompt_path": prompt_path,
-        "review_path": review_path,
-        "stdout_jsonl_path": stdout_path,
-        "stderr_log_path": stderr_path,
-    });
-    write_file(
-        codex_issue_review_status_path(context),
-        &serde_json::to_string_pretty(&value)
-            .map_err(|e| format!("render Codex issue review status: {e}"))?,
-    )
-}
-
-fn require_codex_review_for_proposal(
-    context: &IssueSetArtifactContext,
-    proposal_id: &str,
-) -> Result<(), String> {
-    let status_path = codex_issue_review_status_path(context);
-    let raw = fs::read_to_string(&status_path).map_err(|e| {
-        format!(
-            "missing Codex issue proposal review {}; rerun `agentactr issue draft ... --codex-review` or omit --require-codex-review after explicit human review: {e}",
-            status_path.display()
-        )
-    })?;
-    let parsed = serde_json::from_str::<serde_json::Value>(&raw).map_err(|e| {
-        format!(
-            "parse Codex issue review status {}: {e}",
-            status_path.display()
-        )
-    })?;
-    if parsed.get("status").and_then(serde_json::Value::as_str) != Some("approved") {
-        return Err(format!(
-            "Codex issue proposal review is not approved in {}",
-            status_path.display()
-        ));
-    }
-    let reviewed = parsed
-        .get("reviewed_proposal_ids")
-        .and_then(serde_json::Value::as_array)
-        .map(|ids| {
-            ids.iter()
-                .filter_map(serde_json::Value::as_str)
-                .any(|id| id == proposal_id)
-        })
-        .unwrap_or(false);
-    if !reviewed {
-        return Err(format!(
-            "proposal {proposal_id} was not covered by Codex review {}",
-            status_path.display()
-        ));
-    }
-    Ok(())
-}
-
-fn parse_issue_dedupe(value: &serde_json::Value) -> agentactr_sdk::IssueDedupeStatus {
-    match value
-        .get("dedupe")
-        .or_else(|| value.get("dedupe_status"))
-        .and_then(serde_json::Value::as_str)
-    {
-        Some("duplicate_blocked") => agentactr_sdk::IssueDedupeStatus::DuplicateBlocked,
-        Some("possible_duplicate") => agentactr_sdk::IssueDedupeStatus::PossibleDuplicate,
-        _ => agentactr_sdk::IssueDedupeStatus::Unique,
-    }
-}
-
-fn parse_issue_framework(value: &serde_json::Value) -> Option<agentactr_sdk::FrameworkDeclaration> {
-    let framework = value.get("framework")?;
-    parse_framework_value(framework)
-}
-
-fn parse_framework_value(value: &serde_json::Value) -> Option<agentactr_sdk::FrameworkDeclaration> {
-    if !value.is_object() {
-        return None;
-    }
-    Some(agentactr_sdk::FrameworkDeclaration {
-        ecosystem: value
-            .get("ecosystem")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        id: value
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        version_or_profile: value
-            .get("version_or_profile")
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string),
-    })
-}
-
-fn framework_to_json(framework: &agentactr_sdk::FrameworkDeclaration) -> serde_json::Value {
-    serde_json::json!({
-        "ecosystem": framework.ecosystem,
-        "id": framework.id,
-        "version_or_profile": framework.version_or_profile,
-    })
-}
-
-fn new_issue_set_id(kind: &str) -> String {
-    new_run_id(kind)
-}
-
-fn ensure_issue_proposal_capabilities(
-    proposal: &IssueProposal,
-    capabilities: &AdapterCapabilities,
-) -> Result<(), String> {
-    let supported = |feature: &str| {
-        capabilities
-            .supported_features
-            .iter()
-            .any(|supported| supported == feature)
-    };
-    if !proposal.labels.is_empty() && !supported("issue_labels") {
-        return Err("tracker adapter does not support issue_labels for this proposal".to_string());
-    }
-    if !proposal.assignees.is_empty() && !supported("issue_assignees") {
-        return Err(
-            "tracker adapter does not support issue_assignees for this proposal".to_string(),
-        );
-    }
-    if proposal.milestone.is_some() && !supported("issue_milestone") {
-        return Err(
-            "tracker adapter does not support issue_milestone for this proposal".to_string(),
-        );
-    }
-    if proposal.issue_type.is_some() && !supported("issue_type") {
-        return Err("tracker adapter does not support issue_type for this proposal".to_string());
-    }
-    if !proposal.issue_field_values.is_empty() && !supported("issue_field_values") {
-        return Err(
-            "tracker adapter does not support issue_field_values for this proposal".to_string(),
-        );
-    }
-    if !proposal.project_fields.is_empty() && !supported("github_projects_v2") {
-        return Err(
-            "tracker adapter does not support github_projects_v2 for this proposal".to_string(),
-        );
-    }
-    Ok(())
-}
-
-fn parse_issue_field_values(value: &serde_json::Value) -> Result<Vec<IssueFieldValue>, String> {
-    let Some(fields) = value
-        .get("issue_field_values")
-        .and_then(serde_json::Value::as_array)
-    else {
-        return Ok(Vec::new());
-    };
-    fields
-        .iter()
-        .map(|field| {
-            let field_id = field
-                .get("field_id")
-                .and_then(serde_json::Value::as_i64)
-                .ok_or("issue_field_values entries require integer field_id")?;
-            let value = field
-                .get("value")
-                .and_then(serde_json::Value::as_str)
-                .ok_or("issue_field_values entries require string value")?
-                .to_string();
-            let value_type = field
-                .get("type")
-                .or_else(|| field.get("value_type"))
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string);
-            Ok(IssueFieldValue {
-                field_id,
-                value,
-                value_type,
-            })
-        })
-        .collect()
-}
-
-fn parse_issue_project_fields(
-    value: &serde_json::Value,
-) -> Result<Vec<IssueProjectFieldValue>, String> {
-    let Some(fields) = value
-        .get("project_fields")
-        .and_then(serde_json::Value::as_array)
-    else {
-        return Ok(Vec::new());
-    };
-    if fields.len() > 20 {
-        return Err("project_fields exceeds 20 entries".to_string());
-    }
-    let mut parsed = Vec::new();
-    for field in fields {
-        let field_name = field
-            .get("field_name")
-            .or_else(|| field.get("name"))
-            .and_then(serde_json::Value::as_str)
-            .ok_or("project_fields entries require string field_name")?
-            .trim();
-        let value = field
-            .get("value")
-            .and_then(serde_json::Value::as_str)
-            .ok_or("project_fields entries require string value")?
-            .trim();
-        if field_name.is_empty() || value.is_empty() {
-            continue;
-        }
-        validate_issue_project_field_value(field_name, value)?;
-        parsed.retain(|existing: &IssueProjectFieldValue| existing.field_name != field_name);
-        parsed.push(IssueProjectFieldValue {
-            field_name: field_name.to_string(),
-            value: value.to_string(),
-        });
-    }
-    parsed.sort_by(|a, b| a.field_name.cmp(&b.field_name));
-    Ok(parsed)
-}
-
-fn validate_issue_project_field_value(field_name: &str, value: &str) -> Result<(), String> {
-    match field_name {
-        "Priority" if !matches!(value, "P0" | "P1" | "P2") => {
-            Err("project field `Priority` must be P0, P1, or P2".to_string())
-        }
-        "Size" if !matches!(value, "XS" | "S" | "M" | "L" | "XL") => {
-            Err("project field `Size` must be XS, S, M, L, or XL".to_string())
-        }
-        _ => Ok(()),
-    }
-}
-
-fn json_required_str(value: &serde_json::Value, key: &str) -> Result<String, String> {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string)
-        .ok_or_else(|| format!("issue proposal is missing string field `{key}`"))
-}
-
-fn json_string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .map(ToString::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 fn emit_github_rate_limit_trace_events(
     config: &AgentactrConfig,
     run_id: &str,
@@ -5450,24 +2312,6 @@ fn lifecycle_labels_from_config(config: &AgentactrConfig) -> LifecycleLabels {
         failed_label: config.tracker.failed_label.clone(),
         done_label: config.tracker.done_label.clone(),
     }
-}
-
-fn write_quality_status(
-    report_path: &Path,
-    success: bool,
-    failed_reason: Option<&str>,
-) -> Result<(), String> {
-    let payload = serde_json::json!({
-        "schema_version": "0.1",
-        "success": success,
-        "report_path": report_path.display().to_string(),
-        "failed_reason": failed_reason,
-    });
-    write_file(
-        agentactr_sdk::quality_status_path(report_path),
-        &serde_json::to_string_pretty(&payload)
-            .map_err(|e| format!("render quality status: {e}"))?,
-    )
 }
 
 fn record_finalization_status(
@@ -5567,639 +2411,6 @@ fn record_lifecycle_report(
         }),
     )?;
     record_finalization_status(config, run_id, repo, issue, artifact_dir, &report.status)
-}
-
-struct QualityCommandOutput {
-    executed_command: String,
-    status: String,
-    success: bool,
-    stdout: String,
-    stderr: String,
-}
-
-struct TimedCommandOutput {
-    status: Option<std::process::ExitStatus>,
-    stdout: String,
-    stderr: String,
-    timed_out: bool,
-}
-
-impl TimedCommandOutput {
-    fn status_text(&self) -> String {
-        if self.timed_out {
-            format!("timed out after {}s", quality_gate_timeout().as_secs())
-        } else {
-            self.status
-                .map(|status| status.to_string())
-                .unwrap_or_else(|| "terminated without exit status".to_string())
-        }
-    }
-
-    fn success(&self) -> bool {
-        !self.timed_out && self.status.is_some_and(|status| status.success())
-    }
-}
-
-fn run_quality_command(
-    name: &str,
-    command: &str,
-    worktree: &Path,
-) -> Result<QualityCommandOutput, String> {
-    if let Some(output) = run_go_logical_quality_command(command, worktree)? {
-        return Ok(output);
-    }
-
-    let mut process = Command::new("sh");
-    process.arg("-lc").arg(command).current_dir(worktree);
-    let output = run_command_with_timeout(&mut process, name, quality_gate_timeout())?;
-    Ok(QualityCommandOutput {
-        executed_command: command.to_string(),
-        status: output.status_text(),
-        success: output.success(),
-        stdout: output.stdout,
-        stderr: output.stderr,
-    })
-}
-
-fn quality_gate_timeout() -> Duration {
-    Duration::from_secs(30 * 60)
-}
-
-fn run_command_with_timeout(
-    command: &mut Command,
-    name: &str,
-    timeout: Duration,
-) -> Result<TimedCommandOutput, String> {
-    configure_quality_process_group(command);
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("start quality gate `{name}`: {e}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| format!("quality gate `{name}` stdout unavailable"))?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| format!("quality gate `{name}` stderr unavailable"))?;
-    let stdout_thread = thread::spawn(move || read_stream_to_string(stdout));
-    let stderr_thread = thread::spawn(move || read_stream_to_string(stderr));
-    let (status, timed_out) = wait_quality_child(&mut child, timeout)?;
-    let stdout = stdout_thread
-        .join()
-        .map_err(|_| format!("quality gate `{name}` stdout reader panicked"))??;
-    let stderr = stderr_thread
-        .join()
-        .map_err(|_| format!("quality gate `{name}` stderr reader panicked"))??;
-    Ok(TimedCommandOutput {
-        status,
-        stdout,
-        stderr,
-        timed_out,
-    })
-}
-
-fn read_stream_to_string(mut stream: impl Read) -> Result<String, String> {
-    let mut output = Vec::new();
-    stream
-        .read_to_end(&mut output)
-        .map_err(|e| format!("read command stream: {e}"))?;
-    Ok(String::from_utf8_lossy(&output).to_string())
-}
-
-fn wait_quality_child(
-    child: &mut std::process::Child,
-    timeout: Duration,
-) -> Result<(Option<std::process::ExitStatus>, bool), String> {
-    let start = Instant::now();
-    loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|e| format!("poll quality gate: {e}"))?
-        {
-            return Ok((Some(status), false));
-        }
-        if start.elapsed() >= timeout {
-            terminate_child(child, Duration::from_secs(2));
-            return Ok((None, true));
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-}
-
-fn run_gofmt_check(worktree: &Path) -> Result<QualityCommandOutput, String> {
-    run_gofmt_check_with_executed_command(worktree, "gofmt -l <go files>".to_string())
-}
-
-fn run_gofmt_check_with_executed_command(
-    worktree: &Path,
-    executed_command: String,
-) -> Result<QualityCommandOutput, String> {
-    let files = collect_go_files(worktree)?;
-    if files.is_empty() {
-        return Ok(QualityCommandOutput {
-            executed_command,
-            status: "skipped: no Go files".to_string(),
-            success: true,
-            stdout: String::new(),
-            stderr: String::new(),
-        });
-    }
-    let mut process = Command::new("gofmt");
-    process.arg("-l").args(&files).current_dir(worktree);
-    let output = run_command_with_timeout(&mut process, "gofmt", quality_gate_timeout())?;
-    let success = output.success() && output.stdout.trim().is_empty();
-    let status = if success || output.timed_out {
-        output.status_text()
-    } else {
-        format!("{}; files need gofmt", output.status_text())
-    };
-    Ok(QualityCommandOutput {
-        executed_command,
-        status,
-        success,
-        stdout: output.stdout,
-        stderr: output.stderr,
-    })
-}
-
-fn run_go_mod_tidy_check(worktree: &Path) -> Result<QualityCommandOutput, String> {
-    run_go_mod_tidy_check_for_module(worktree, worktree, ".".to_string())
-}
-
-fn run_go_mod_tidy_check_for_module(
-    repo_root: &Path,
-    module_root: &Path,
-    module_display: String,
-) -> Result<QualityCommandOutput, String> {
-    let executed_command = if module_display == "." {
-        "go mod tidy in temporary copy".to_string()
-    } else {
-        format!("cd {module_display} && go mod tidy in temporary copy")
-    };
-    if !module_root.join("go.mod").exists() {
-        return Ok(QualityCommandOutput {
-            executed_command,
-            status: "failed: go.mod missing".to_string(),
-            success: false,
-            stdout: String::new(),
-            stderr: "go mod tidy-check requires go.mod".to_string(),
-        });
-    }
-    let temp_root = env::temp_dir().join(format!(
-        "agentactr-go-tidy-check-{}-{}",
-        std::process::id(),
-        current_epoch_millis()
-    ));
-    let copy_result = copy_worktree_for_quality_check(repo_root, &temp_root);
-    if let Err(err) = copy_result {
-        let _ = fs::remove_dir_all(&temp_root);
-        return Err(err);
-    }
-    let module_rel = module_root
-        .strip_prefix(repo_root)
-        .map_err(|e| {
-            let _ = fs::remove_dir_all(&temp_root);
-            format!(
-                "strip module root {} from repo root {}: {e}",
-                module_root.display(),
-                repo_root.display()
-            )
-        })?
-        .to_path_buf();
-    let temp_module_root = temp_root.join(&module_rel);
-    let mut process = Command::new("go");
-    process
-        .arg("mod")
-        .arg("tidy")
-        .current_dir(&temp_module_root);
-    let output =
-        match run_command_with_timeout(&mut process, "go mod tidy-check", quality_gate_timeout()) {
-            Ok(output) => output,
-            Err(err) => {
-                let _ = fs::remove_dir_all(&temp_root);
-                return Err(err);
-            }
-        };
-    let changed = module_file_changed(module_root, &temp_module_root, "go.mod")
-        || module_file_changed(module_root, &temp_module_root, "go.sum");
-    let success = output.success() && !changed;
-    let status = if success || output.timed_out {
-        output.status_text()
-    } else if changed {
-        format!("{}; go.mod/go.sum would change", output.status_text())
-    } else {
-        output.status_text()
-    };
-    let _ = fs::remove_dir_all(&temp_root);
-    Ok(QualityCommandOutput {
-        executed_command,
-        status,
-        success,
-        stdout: output.stdout,
-        stderr: output.stderr,
-    })
-}
-
-fn run_go_logical_quality_command(
-    command: &str,
-    worktree: &Path,
-) -> Result<Option<QualityCommandOutput>, String> {
-    match command {
-        "gofmt-check" => return run_gofmt_check(worktree).map(Some),
-        "go mod tidy-check" => return run_go_mod_tidy_check(worktree).map(Some),
-        _ => {}
-    }
-
-    let Some((scope, logical_command)) = parse_scoped_go_logical_command(command)? else {
-        return Ok(None);
-    };
-    let scoped_worktree = resolve_scoped_quality_dir(worktree, &scope)?;
-    let scoped_prefix = format!("cd {scope}");
-    match logical_command {
-        "gofmt-check" => run_gofmt_check_with_executed_command(
-            &scoped_worktree,
-            format!("{scoped_prefix} && gofmt -l <go files>"),
-        )
-        .map(Some),
-        "go mod tidy-check" => {
-            run_go_mod_tidy_check_for_module(worktree, &scoped_worktree, scope).map(Some)
-        }
-        _ => Ok(None),
-    }
-}
-
-fn parse_scoped_go_logical_command(
-    command: &str,
-) -> Result<Option<(String, &'static str)>, String> {
-    let Some((cd_part, logical_command)) = command
-        .strip_suffix(" && gofmt-check")
-        .map(|prefix| (prefix, "gofmt-check"))
-        .or_else(|| {
-            command
-                .strip_suffix(" && go mod tidy-check")
-                .map(|prefix| (prefix, "go mod tidy-check"))
-        })
-    else {
-        return Ok(None);
-    };
-    let Some(scope_word) = cd_part.strip_prefix("cd ") else {
-        return Ok(None);
-    };
-    let scope = unquote_shell_word(scope_word)
-        .ok_or_else(|| format!("unsupported scoped Go quality command `{command}`"))?;
-    Ok(Some((scope, logical_command)))
-}
-
-fn unquote_shell_word(value: &str) -> Option<String> {
-    if value.is_empty() {
-        return None;
-    }
-    if value
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-'))
-    {
-        return Some(value.to_string());
-    }
-
-    let mut output = String::new();
-    let mut chars = value.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\'' {
-            loop {
-                match chars.next() {
-                    Some('\'') => break,
-                    Some(quoted) => output.push(quoted),
-                    None => return None,
-                }
-            }
-        } else if ch == '\\' && chars.peek() == Some(&'\'') {
-            chars.next();
-            output.push('\'');
-        } else {
-            return None;
-        }
-    }
-    Some(output)
-}
-
-fn resolve_scoped_quality_dir(worktree: &Path, scope: &str) -> Result<PathBuf, String> {
-    let relative = Path::new(scope);
-    if scope.trim().is_empty()
-        || relative.is_absolute()
-        || relative
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
-        return Err(format!("invalid scoped Go quality directory `{scope}`"));
-    }
-    let canonical_worktree = fs::canonicalize(worktree)
-        .map_err(|e| format!("canonicalize worktree {}: {e}", worktree.display()))?;
-    let scoped = fs::canonicalize(worktree.join(relative)).map_err(|e| {
-        format!(
-            "canonicalize scoped Go quality directory {}: {e}",
-            worktree.join(relative).display()
-        )
-    })?;
-    if !scoped.starts_with(&canonical_worktree) {
-        return Err(format!(
-            "scoped Go quality directory `{scope}` escapes worktree {}",
-            worktree.display()
-        ));
-    }
-    Ok(scoped)
-}
-
-fn collect_go_files(root: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut files = Vec::new();
-    collect_go_files_inner(root, root, &mut files)?;
-    Ok(files)
-}
-
-fn collect_go_files_inner(root: &Path, dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
-    for entry in fs::read_dir(dir).map_err(|e| format!("read {}: {e}", dir.display()))? {
-        let entry = entry.map_err(|e| format!("read {} entry: {e}", dir.display()))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|e| format!("read {} type: {e}", path.display()))?;
-        if file_type.is_dir() {
-            if should_skip_quality_dir(&path) {
-                continue;
-            }
-            collect_go_files_inner(root, &path, files)?;
-        } else if file_type.is_file()
-            && path.extension().and_then(|value| value.to_str()) == Some("go")
-        {
-            files.push(
-                path.strip_prefix(root)
-                    .map_err(|e| format!("strip {} prefix: {e}", path.display()))?
-                    .to_path_buf(),
-            );
-        }
-    }
-    Ok(())
-}
-
-fn should_skip_quality_dir(path: &Path) -> bool {
-    matches!(
-        path.file_name().and_then(|value| value.to_str()),
-        Some(".git" | ".agentactr" | "target" | "node_modules")
-    )
-}
-
-fn copy_worktree_for_quality_check(source: &Path, target: &Path) -> Result<(), String> {
-    create_dir(target)?;
-    copy_worktree_dir(source, source, target)
-}
-
-fn copy_worktree_dir(root: &Path, source: &Path, target_root: &Path) -> Result<(), String> {
-    for entry in fs::read_dir(source).map_err(|e| format!("read {}: {e}", source.display()))? {
-        let entry = entry.map_err(|e| format!("read {} entry: {e}", source.display()))?;
-        let path = entry.path();
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|e| format!("strip {} prefix: {e}", path.display()))?;
-        if should_skip_quality_dir(&path) {
-            continue;
-        }
-        let target = target_root.join(relative);
-        let file_type = entry
-            .file_type()
-            .map_err(|e| format!("read {} type: {e}", path.display()))?;
-        if file_type.is_dir() {
-            create_dir(&target)?;
-            copy_worktree_dir(root, &path, target_root)?;
-        } else if file_type.is_file() {
-            if let Some(parent) = target.parent() {
-                create_dir(parent)?;
-            }
-            fs::copy(&path, &target)
-                .map_err(|e| format!("copy {} to {}: {e}", path.display(), target.display()))?;
-        }
-    }
-    Ok(())
-}
-
-fn module_file_changed(original_root: &Path, temp_root: &Path, file: &str) -> bool {
-    let original_path = original_root.join(file);
-    let temp_path = temp_root.join(file);
-    let original = fs::read(&original_path).ok();
-    let temp = fs::read(&temp_path).ok();
-    original != temp
-}
-
-fn run_quality_gates_to_report(
-    inspection: &RepoInspection,
-    worktree: &Path,
-    report_path: &Path,
-    domain_gate_opt_ins: &[String],
-) -> Result<(), String> {
-    let effective = inspection;
-    let mut report = String::new();
-    report.push_str(&format!(
-        "stack={}\nconfidence={}\nworktree={}\n\n",
-        effective.primary_stack.as_str(),
-        effective.confidence,
-        worktree.display()
-    ));
-    if effective.quality_plan.is_empty() && effective.domain_quality_plan.is_empty() {
-        report.push_str("quality_plan=empty\n");
-        write_file(report_path, &report)?;
-        let err = "strict quality gate failed: no quality plan for detected stack".to_string();
-        write_quality_status(report_path, false, Some(&err))?;
-        return Err(err);
-    }
-    let typed_language_gates_present = effective
-        .domain_quality_plan
-        .iter()
-        .any(|gate| gate.domain.starts_with("language.") && gate.command.as_deref().is_some());
-    if typed_language_gates_present && !effective.quality_plan.is_empty() {
-        report.push_str("legacy_stack_quality_plan=migrated_to_typed_domain_gates\n\n");
-        write_file(report_path, &report)?;
-    } else {
-        for cmd in &effective.quality_plan {
-            println!("quality gate: {} -> {}", cmd.name, cmd.command);
-            let output = match run_quality_command(&cmd.name, &cmd.command, worktree) {
-                Ok(output) => output,
-                Err(err) => {
-                    write_quality_status(report_path, false, Some(&err))?;
-                    return Err(err);
-                }
-            };
-            report.push_str(&format!(
-                "## {}\ncommand={}\nstatus={}\nrequired={}\nfinal_gate={}\n\nstdout:\n{}\n\nstderr:\n{}\n\n",
-                cmd.name,
-                output.executed_command,
-                output.status,
-                cmd.required,
-                cmd.non_mutating_final_gate,
-                output.stdout,
-                output.stderr
-            ));
-            write_file(report_path, &report)?;
-            if cmd.required && !output.success {
-                let report_ref = repo_relative_agentactr_path(report_path);
-                let network_guidance =
-                    quality_network_failure_guidance(&cmd.name, &output.stdout, &output.stderr);
-                if let Some(guidance) = network_guidance.as_ref() {
-                    report.push_str("\nnetwork_guidance:\n");
-                    report.push_str(guidance);
-                    report.push('\n');
-                    write_file(report_path, &report)?;
-                }
-                let mut err = format!(
-                    "strict quality gate failed: {} exited with {}; report={}",
-                    cmd.name, output.status, report_ref
-                );
-                if let Some(guidance) = network_guidance {
-                    err.push_str("; ");
-                    err.push_str(&guidance);
-                }
-                write_quality_status(report_path, false, Some(&err))?;
-                return Err(err);
-            }
-        }
-    }
-    for gate in &effective.domain_quality_plan {
-        let Some(command) = gate.command.as_deref() else {
-            report.push_str(&format!(
-                "## domain:{}\ndomain={}\ntool={}\nstatus=finding-only\nrequired={}\nsetup_guidance={}\n\n",
-                gate.name,
-                gate.domain,
-                gate.tool,
-                gate.required,
-                gate.setup_guidance.join(" | ")
-            ));
-            write_file(report_path, &report)?;
-            continue;
-        };
-        let enabled_by_config = domain_gate_enabled_by_config(gate, domain_gate_opt_ins);
-        if (gate.opt_in_required || gate.network_required || gate.credential_required)
-            && !enabled_by_config
-        {
-            println!(
-                "domain quality gate skipped: {} -> {} (opt_in={} network={} credentials={})",
-                gate.name,
-                command,
-                gate.opt_in_required,
-                gate.network_required,
-                gate.credential_required
-            );
-            report.push_str(&format!(
-                "## domain:{}\ndomain={}\ntool={}\ncommand={}\nstatus=skipped\nrequired={}\nopt_in_required={}\nnetwork_required={}\ncredential_required={}\nenabled_by_config=false\nsetup_guidance={}\n\n",
-                gate.name,
-                gate.domain,
-                gate.tool,
-                command,
-                gate.required,
-                gate.opt_in_required,
-                gate.network_required,
-                gate.credential_required,
-                gate.setup_guidance.join(" | ")
-            ));
-            write_file(report_path, &report)?;
-            continue;
-        }
-        println!("domain quality gate: {} -> {}", gate.name, command);
-        let output = match run_quality_command(&gate.name, command, worktree) {
-            Ok(output) => output,
-            Err(err) => {
-                write_quality_status(report_path, false, Some(&err))?;
-                return Err(err);
-            }
-        };
-        report.push_str(&format!(
-            "## domain:{}\ndomain={}\ntool={}\ncommand={}\nstatus={}\nrequired={}\nmutates={}\nenabled_by_config={}\n\nstdout:\n{}\n\nstderr:\n{}\n\n",
-            gate.name,
-            gate.domain,
-            gate.tool,
-            output.executed_command,
-            output.status,
-            gate.required,
-            gate.mutates,
-            enabled_by_config,
-            output.stdout,
-            output.stderr
-        ));
-        write_file(report_path, &report)?;
-        if gate.required && !output.success {
-            let report_ref = repo_relative_agentactr_path(report_path);
-            let mut err = format!(
-                "strict domain quality gate failed: {} exited with {}; report={}",
-                gate.name, output.status, report_ref
-            );
-            if gate.degraded_if_missing {
-                err.push_str("; domain governance is degraded until the required toolchain/configuration is present");
-            }
-            write_quality_status(report_path, false, Some(&err))?;
-            return Err(err);
-        }
-    }
-    write_quality_status(report_path, true, None)?;
-    Ok(())
-}
-
-fn domain_gate_enabled_by_config(
-    gate: &agentactr_sdk::DomainQualityGate,
-    opt_ins: &[String],
-) -> bool {
-    let gate_key = format!("{}:{}", gate.domain, gate.name);
-    opt_ins.iter().any(|value| {
-        let normalized = value.trim().to_ascii_lowercase();
-        normalized == "all"
-            || normalized == gate.domain
-            || normalized == gate.name
-            || normalized == gate_key
-            || normalized == format!("{}:*", gate.domain)
-    })
-}
-
-fn repo_relative_agentactr_path(path: &Path) -> String {
-    let components: Vec<_> = path.components().collect();
-    for (idx, component) in components.iter().enumerate() {
-        if component.as_os_str() == ".agentactr" {
-            let mut out = PathBuf::new();
-            for component in &components[idx..] {
-                out.push(component.as_os_str());
-            }
-            return out.display().to_string();
-        }
-    }
-    path.display().to_string()
-}
-
-fn quality_network_failure_guidance(name: &str, stdout: &str, stderr: &str) -> Option<String> {
-    let output = format!("{stdout}\n{stderr}").to_ascii_lowercase();
-    let network_markers = [
-        "connectionrefused",
-        "failedtoopensocket",
-        "failed to open socket",
-        "could not resolve",
-        "couldn't resolve",
-        "temporary failure in name resolution",
-        "name or service not known",
-        "network is unreachable",
-        "failed to connect",
-        "econnrefused",
-        "enotfound",
-        "etimedout",
-        "timed out connecting",
-        "dial tcp",
-        "lookup ",
-        "unable to access 'https://",
-        "error sending request",
-        "download of config.json failed",
-        "downloading package manifest",
-    ];
-    if !network_markers.iter().any(|marker| output.contains(marker)) {
-        return None;
-    }
-    Some(format!(
-        "quality gate `{name}` appears to require network access; fail-closed/non-interactive runs do not request approval. Preinstall/cache dependencies or rerun with `--human-intervention interactive --codex-approval on-request`."
-    ))
 }
 
 fn record_run_state(
@@ -6376,372 +2587,6 @@ fn record_run_state(
     Ok(())
 }
 
-fn load_issue_submission_ledger(
-    config: &AgentactrConfig,
-    issue_set_id: &str,
-    proposal: &IssueProposal,
-) -> Result<Option<IssueSubmissionLedgerEntry>, String> {
-    use sqlx_core::row::Row;
-
-    let key = agentactr_sdk::issue_submission_key(issue_set_id, proposal);
-    with_issue_ledger_pool(config, |runtime, pool| {
-        runtime.block_on(async {
-            ensure_issue_submission_ledger_table(&pool).await?;
-            let row = sqlx_core::query::query(
-                r#"SELECT state, created_issue_number, created_issue_id, created_issue_url, detail
-                   FROM issue_submission_ledger
-                   WHERE issue_set_id = ?1 AND proposal_id = ?2 AND repo = ?3
-                     AND parent_issue_key = ?4 AND proposal_digest = ?5"#,
-            )
-            .bind(&key.issue_set_id)
-            .bind(key.proposal_id.as_str())
-            .bind(&key.repo)
-            .bind(&key.parent_issue_key)
-            .bind(&key.proposal_digest)
-            .fetch_optional(&pool)
-            .await
-            .map_err(|e| format!("read issue submission ledger: {e}"))?;
-            let Some(row) = row else {
-                return Ok(None);
-            };
-            let state: String = row
-                .try_get("state")
-                .map_err(|e| format!("read issue ledger state: {e}"))?;
-            Ok(Some(IssueSubmissionLedgerEntry {
-                key,
-                state: parse_issue_submission_state(&state)?,
-                created_issue_number: row
-                    .try_get::<Option<i64>, _>("created_issue_number")
-                    .map_err(|e| format!("read issue ledger number: {e}"))?
-                    .and_then(|value| u64::try_from(value).ok()),
-                created_issue_id: row
-                    .try_get::<Option<i64>, _>("created_issue_id")
-                    .map_err(|e| format!("read issue ledger id: {e}"))?
-                    .and_then(|value| u64::try_from(value).ok()),
-                created_issue_url: row
-                    .try_get("created_issue_url")
-                    .map_err(|e| format!("read issue ledger url: {e}"))?,
-                detail: row
-                    .try_get("detail")
-                    .map_err(|e| format!("read issue ledger detail: {e}"))?,
-            }))
-        })
-    })
-}
-
-fn begin_issue_submission(
-    config: &AgentactrConfig,
-    issue_set_id: &str,
-    proposal: &IssueProposal,
-    duplicate_reason: Option<&str>,
-) -> Result<(), String> {
-    let key = agentactr_sdk::issue_submission_key(issue_set_id, proposal);
-    with_issue_ledger_pool(config, |runtime, pool| {
-        runtime.block_on(async {
-            ensure_issue_submission_ledger_table(&pool).await?;
-            let mut tx = pool
-                .begin()
-                .await
-                .map_err(|e| format!("begin issue submission ledger transaction: {e}"))?;
-            let existing = sqlx_core::query::query(
-                r#"SELECT state FROM issue_submission_ledger
-                   WHERE issue_set_id = ?1 AND proposal_id = ?2 AND repo = ?3
-                     AND parent_issue_key = ?4 AND proposal_digest = ?5"#,
-            )
-            .bind(&key.issue_set_id)
-            .bind(key.proposal_id.as_str())
-            .bind(&key.repo)
-            .bind(&key.parent_issue_key)
-            .bind(&key.proposal_digest)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| format!("read issue submission ledger for lock: {e}"))?;
-            let submit_detail = duplicate_reason
-                .filter(|reason| !reason.trim().is_empty())
-                .map(|reason| format!(
-                    "request submitted; duplicate_override_reason_sha256={}",
-                    sha256_hex_bytes(reason.as_bytes())
-                ))
-                .unwrap_or_else(|| "request submitted".to_string());
-            let begin_decision = if let Some(row) = existing {
-                use sqlx_core::row::Row;
-                let state: String = row
-                    .try_get("state")
-                    .map_err(|e| format!("read issue ledger state: {e}"))?;
-                let entry = IssueSubmissionLedgerEntry {
-                    key: key.clone(),
-                    state: parse_issue_submission_state(&state)?,
-                    created_issue_number: None,
-                    created_issue_id: None,
-                    created_issue_url: None,
-                    detail: String::new(),
-                };
-                agentactr_sdk::plan_issue_submission_begin(Some(&entry))
-            } else {
-                agentactr_sdk::plan_issue_submission_begin(None)
-            };
-            match begin_decision {
-                agentactr_sdk::IssueSubmissionBeginDecision::InsertSubmitted => {
-                    sqlx_core::query::query(
-                        r#"INSERT INTO issue_submission_ledger
-                           (run_id, issue_set_id, proposal_id, repo, parent_issue, parent_issue_key, proposal_digest, state, detail)
-                           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'submitted', ?8)"#,
-                    )
-                    .bind(&key.run_id)
-                    .bind(&key.issue_set_id)
-                    .bind(key.proposal_id.as_str())
-                    .bind(&key.repo)
-                    .bind(ledger_parent_issue_value(key.parent_issue))
-                    .bind(&key.parent_issue_key)
-                    .bind(&key.proposal_digest)
-                    .bind(&submit_detail)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| format!("insert issue submission ledger: {e}"))?;
-                }
-                agentactr_sdk::IssueSubmissionBeginDecision::TransitionPendingToSubmitted => {
-                    let affected = sqlx_core::query::query(
-                        r#"UPDATE issue_submission_ledger
-                           SET state = 'submitted',
-                               detail = ?6,
-                               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                           WHERE issue_set_id = ?1 AND proposal_id = ?2 AND repo = ?3
-                             AND parent_issue_key = ?4 AND proposal_digest = ?5
-                             AND state = 'pending'"#,
-                    )
-                    .bind(&key.issue_set_id)
-                    .bind(key.proposal_id.as_str())
-                    .bind(&key.repo)
-                    .bind(&key.parent_issue_key)
-                    .bind(&key.proposal_digest)
-                    .bind(&submit_detail)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(|e| format!("transition pending issue submission ledger: {e}"))?
-                    .rows_affected();
-                    if affected != 1 {
-                        tx.rollback()
-                            .await
-                            .map_err(|e| format!("rollback issue submission ledger CAS: {e}"))?;
-                        return Err(
-                            "issue submission ledger compare-and-set failed; retry after inspecting current ledger state"
-                                .to_string(),
-                        );
-                    }
-                }
-                agentactr_sdk::IssueSubmissionBeginDecision::Blocked(reason) => {
-                    tx.rollback()
-                        .await
-                        .map_err(|e| format!("rollback issue submission ledger lock: {e}"))?;
-                    return Err(reason);
-                }
-            }
-            tx.commit()
-                .await
-                .map_err(|e| format!("commit issue submission ledger lock: {e}"))
-        })
-    })
-}
-
-fn materialize_issue_submission_pending(
-    config: &AgentactrConfig,
-    issue_set_id: &str,
-    proposals: &[IssueProposal],
-) -> Result<(), String> {
-    with_issue_ledger_pool(config, |runtime, pool| {
-        runtime.block_on(async {
-            ensure_issue_submission_ledger_table(&pool).await?;
-            let mut tx = pool
-                .begin()
-                .await
-                .map_err(|e| format!("begin issue proposal ledger materialization: {e}"))?;
-            for proposal in proposals {
-                let key = agentactr_sdk::issue_submission_key(issue_set_id, proposal);
-                sqlx_core::query::query(
-                    r#"INSERT OR IGNORE INTO issue_submission_ledger
-                       (run_id, issue_set_id, proposal_id, repo, parent_issue, parent_issue_key, proposal_digest, state, detail)
-                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', 'proposal materialized')"#,
-                )
-                .bind(&key.run_id)
-                .bind(&key.issue_set_id)
-                .bind(key.proposal_id.as_str())
-                .bind(&key.repo)
-                .bind(ledger_parent_issue_value(key.parent_issue))
-                .bind(&key.parent_issue_key)
-                .bind(&key.proposal_digest)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("materialize issue submission ledger pending row: {e}"))?;
-            }
-            tx.commit()
-                .await
-                .map_err(|e| format!("commit issue proposal ledger materialization: {e}"))
-        })
-    })
-}
-
-fn record_issue_submission_state(
-    config: &AgentactrConfig,
-    issue_set_id: &str,
-    proposal: &IssueProposal,
-    state: IssueSubmissionLedgerState,
-    issue: Option<&agentactr_sdk::Issue>,
-    tracker_issue_id: Option<u64>,
-    detail: &str,
-) -> Result<(), String> {
-    let key = agentactr_sdk::issue_submission_key(issue_set_id, proposal);
-    with_issue_ledger_pool(config, |runtime, pool| {
-        runtime.block_on(async {
-            ensure_issue_submission_ledger_table(&pool).await?;
-            sqlx_core::query::query(
-                r#"UPDATE issue_submission_ledger
-                   SET state = ?6,
-                       created_issue_number = COALESCE(?7, created_issue_number),
-                       created_issue_id = COALESCE(?8, created_issue_id),
-                       created_issue_url = COALESCE(?9, created_issue_url),
-                       detail = ?10,
-                       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                   WHERE issue_set_id = ?1 AND proposal_id = ?2 AND repo = ?3
-                     AND parent_issue_key = ?4 AND proposal_digest = ?5"#,
-            )
-            .bind(&key.issue_set_id)
-            .bind(key.proposal_id.as_str())
-            .bind(&key.repo)
-            .bind(&key.parent_issue_key)
-            .bind(&key.proposal_digest)
-            .bind(state.as_str())
-            .bind(issue.and_then(|issue| i64::try_from(issue.number).ok()))
-            .bind(tracker_issue_id.and_then(|id| i64::try_from(id).ok()))
-            .bind(issue.and_then(|issue| issue.html_url.clone()))
-            .bind(detail)
-            .execute(&pool)
-            .await
-            .map_err(|e| format!("record issue submission ledger state: {e}"))?;
-            Ok(())
-        })
-    })
-}
-
-fn with_issue_ledger_pool<T>(
-    config: &AgentactrConfig,
-    f: impl FnOnce(tokio::runtime::Runtime, sqlx_sqlite::SqlitePool) -> Result<T, String>,
-) -> Result<T, String> {
-    use sqlx_sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-    use std::str::FromStr;
-
-    let sqlite_path = Path::new(&config.observability.sqlite);
-    if let Some(parent) = sqlite_path.parent() {
-        create_dir(parent)?;
-    }
-    let url = format!("sqlite://{}", sqlite_path.display());
-    let options = SqliteConnectOptions::from_str(&url)
-        .map_err(|e| format!("configure SQLite issue ledger {url}: {e}"))?
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| format!("start Tokio runtime for issue ledger: {e}"))?;
-    let pool = runtime.block_on(async {
-        SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .map_err(|e| format!("open SQLite issue ledger {}: {e}", sqlite_path.display()))
-    })?;
-    f(runtime, pool)
-}
-
-async fn ensure_issue_submission_ledger_table(
-    pool: &sqlx_sqlite::SqlitePool,
-) -> Result<(), String> {
-    sqlx_core::query::query(
-        r#"CREATE TABLE IF NOT EXISTS issue_submission_ledger (
-            run_id TEXT NOT NULL,
-            proposal_id TEXT NOT NULL,
-            repo TEXT NOT NULL,
-            parent_issue INTEGER NOT NULL,
-            proposal_digest TEXT NOT NULL,
-            state TEXT NOT NULL,
-            created_issue_number INTEGER,
-            created_issue_id INTEGER,
-            created_issue_url TEXT,
-            detail TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            PRIMARY KEY (run_id, proposal_id, repo, parent_issue, proposal_digest)
-        )"#,
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| format!("create issue submission ledger table: {e}"))?;
-    add_issue_ledger_column(pool, "issue_set_id", "TEXT").await?;
-    add_issue_ledger_column(pool, "parent_issue_key", "TEXT").await?;
-    sqlx_core::query::query(
-        r#"UPDATE issue_submission_ledger
-           SET issue_set_id = COALESCE(issue_set_id, run_id),
-               parent_issue_key = COALESCE(
-                   parent_issue_key,
-                   CASE
-                       WHEN parent_issue = 0 THEN 'top_level'
-                       ELSE 'parent:' || CAST(parent_issue AS TEXT)
-                   END
-               )
-           WHERE issue_set_id IS NULL OR parent_issue_key IS NULL"#,
-    )
-    .execute(pool)
-    .await
-    .map_err(|e| format!("backfill issue submission ledger columns: {e}"))?;
-    Ok(())
-}
-
-async fn add_issue_ledger_column(
-    pool: &sqlx_sqlite::SqlitePool,
-    column: &str,
-    definition: &str,
-) -> Result<(), String> {
-    let escaped = column.replace('\'', "''");
-    use sqlx_core::row::Row;
-
-    let row = sqlx_core::query::query(&format!(
-        "SELECT COUNT(*) FROM pragma_table_info('issue_submission_ledger') WHERE name = '{escaped}'"
-    ))
-    .fetch_one(pool)
-    .await
-    .map_err(|e| format!("inspect issue submission ledger schema: {e}"))?;
-    let exists: i64 = row
-        .try_get(0)
-        .map_err(|e| format!("read issue submission ledger schema count: {e}"))?;
-    if exists == 0 {
-        sqlx_core::query::query(&format!(
-            "ALTER TABLE issue_submission_ledger ADD COLUMN {column} {definition}"
-        ))
-        .execute(pool)
-        .await
-        .map_err(|e| format!("migrate issue submission ledger column {column}: {e}"))?;
-    }
-    Ok(())
-}
-
-fn ledger_parent_issue_value(parent_issue: Option<u64>) -> i64 {
-    parent_issue
-        .and_then(|issue| i64::try_from(issue).ok())
-        .unwrap_or(0)
-}
-
-fn parse_issue_submission_state(value: &str) -> Result<IssueSubmissionLedgerState, String> {
-    match value {
-        "pending" => Ok(IssueSubmissionLedgerState::Pending),
-        "submitted" => Ok(IssueSubmissionLedgerState::Submitted),
-        "created" => Ok(IssueSubmissionLedgerState::Created),
-        "linked" => Ok(IssueSubmissionLedgerState::Linked),
-        "created_unlinked" => Ok(IssueSubmissionLedgerState::CreatedUnlinked),
-        "created_metadata_mismatch" => Ok(IssueSubmissionLedgerState::CreatedMetadataMismatch),
-        "failed" => Ok(IssueSubmissionLedgerState::Failed),
-        _ => Err(format!("unknown issue submission ledger state `{value}`")),
-    }
-}
-
 struct LocalLeaseHeartbeat {
     stop: mpsc::Sender<()>,
     failure: Arc<Mutex<Option<String>>>,
@@ -6889,17 +2734,17 @@ fn record_phase<T>(
 }
 
 #[derive(Clone)]
-struct RunArtifactContext {
-    run_id: String,
-    repo: String,
-    issue: String,
-    artifact_dir: PathBuf,
-    manifest_path: PathBuf,
-    worktree: PathBuf,
-    base_commit: String,
+pub(crate) struct RunArtifactContext {
+    pub(crate) run_id: String,
+    pub(crate) repo: String,
+    pub(crate) issue: String,
+    pub(crate) artifact_dir: PathBuf,
+    pub(crate) manifest_path: PathBuf,
+    pub(crate) worktree: PathBuf,
+    pub(crate) base_commit: String,
 }
 
-fn load_run_artifact_context(
+pub(crate) fn load_run_artifact_context(
     config: &AgentactrConfig,
     run_id: &str,
 ) -> Result<RunArtifactContext, String> {
@@ -6954,7 +2799,7 @@ fn required_manifest_string(manifest: &serde_json::Value, pointer: &str) -> Resu
         .ok_or_else(|| format!("run context manifest is missing string field `{pointer}`"))
 }
 
-fn validate_run_worktree_scope(
+pub(crate) fn validate_run_worktree_scope(
     config: &AgentactrConfig,
     context: &RunArtifactContext,
 ) -> Result<PathBuf, String> {
@@ -7019,7 +2864,7 @@ fn resolve_path_against_cwd(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
-struct VcsStatus {
+pub(crate) struct VcsStatus {
     run_id: String,
     repo: String,
     issue: String,
@@ -7034,7 +2879,7 @@ struct VcsStatus {
 }
 
 impl VcsStatus {
-    fn to_json(&self) -> serde_json::Value {
+    pub(crate) fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "run_id": self.run_id,
             "repo": self.repo,
@@ -7054,7 +2899,7 @@ impl VcsStatus {
     }
 }
 
-struct VcsInventoryEntry {
+pub(crate) struct VcsInventoryEntry {
     run_id: String,
     repo: Option<String>,
     issue: Option<String>,
@@ -7136,7 +2981,7 @@ impl VcsInventoryEntry {
     }
 }
 
-fn collect_vcs_status(context: &RunArtifactContext) -> Result<VcsStatus, String> {
+pub(crate) fn collect_vcs_status(context: &RunArtifactContext) -> Result<VcsStatus, String> {
     if !context.worktree.is_dir() {
         return Err(format!(
             "run {} worktree is missing or not a directory: {}",
@@ -7168,15 +3013,17 @@ fn collect_vcs_status(context: &RunArtifactContext) -> Result<VcsStatus, String>
     })
 }
 
-fn collect_workspace_diff(context: &RunArtifactContext) -> Result<WorkspaceDiff, String> {
-    LocalGitAdapter.diff(&WorktreeRef {
+pub(crate) fn collect_workspace_diff(
+    context: &RunArtifactContext,
+) -> Result<WorkspaceDiff, String> {
+    Ok(LocalGitAdapter.diff(&WorktreeRef {
         path: context.worktree.clone(),
         base_commit: context.base_commit.clone(),
         run_id: context.run_id.clone(),
-    })
+    })?)
 }
 
-fn record_workspace_diff_artifacts(
+pub(crate) fn record_workspace_diff_artifacts(
     config: &AgentactrConfig,
     context: &RunArtifactContext,
     diff: &WorkspaceDiff,
@@ -7276,7 +3123,7 @@ fn collect_merge_plan(
     config: &AgentactrConfig,
     context: &RunArtifactContext,
 ) -> Result<MergePlan, String> {
-    LocalGitAdapter.merge_plan(MergePlanRequest {
+    Ok(LocalGitAdapter.merge_plan(MergePlanRequest {
         worktree: WorktreeRef {
             path: context.worktree.clone(),
             base_commit: context.base_commit.clone(),
@@ -7285,7 +3132,7 @@ fn collect_merge_plan(
         base_ref: config.vcs.base_ref.clone(),
         merge_mode: config.merge.mode.clone(),
         workspace_diff_artifact: Some(context.artifact_dir.join("workspace.diff.patch")),
-    })
+    })?)
 }
 
 fn record_merge_plan_artifact(
@@ -7413,7 +3260,7 @@ fn print_merge_plan_json(
     Ok(())
 }
 
-fn print_vcs_status(status: &VcsStatus) {
+pub(crate) fn print_vcs_status(status: &VcsStatus) {
     println!("run_id={}", status.run_id);
     println!("repo={}", status.repo);
     println!("issue={}", status.issue);
@@ -7438,7 +3285,7 @@ fn print_vcs_status(status: &VcsStatus) {
     println!("merge_plan=implemented_read_only");
 }
 
-fn git_output_in_dir(worktree: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn git_output_in_dir(worktree: &Path, args: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .arg("-C")
         .arg(worktree)
@@ -7458,7 +3305,9 @@ fn git_output_in_dir(worktree: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
-fn collect_vcs_inventory(config: &AgentactrConfig) -> Result<Vec<VcsInventoryEntry>, String> {
+pub(crate) fn collect_vcs_inventory(
+    config: &AgentactrConfig,
+) -> Result<Vec<VcsInventoryEntry>, String> {
     let artifact_root = resolve_config_path(&config.observability.artifact_root)?;
     let trace_records = read_trace_records(&run_trace_path(config)?)?;
     let run_statuses = latest_run_statuses(&trace_records);
@@ -7545,33 +3394,6 @@ fn collect_vcs_inventory(config: &AgentactrConfig) -> Result<Vec<VcsInventoryEnt
     Ok(out)
 }
 
-fn latest_run_statuses(records: &[TraceRecord]) -> HashMap<String, String> {
-    let mut statuses = HashMap::new();
-    for record in records {
-        if record.event_type == "run.status.updated" {
-            if let Some(status) = record
-                .value
-                .pointer("/payload/status")
-                .and_then(serde_json::Value::as_str)
-            {
-                statuses.insert(record.run_id.clone(), status.to_string());
-            }
-        }
-    }
-    statuses
-}
-
-fn latest_run_status(records: &[TraceRecord], run_id: &str) -> String {
-    records
-        .iter()
-        .rev()
-        .find(|record| record.run_id == run_id && record.event_type == "run.status.updated")
-        .and_then(|record| record.value.pointer("/payload/status"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("unknown")
-        .to_string()
-}
-
 fn git_touched_files(worktree: &Path) -> Result<Vec<String>, String> {
     let output = git_output_in_dir(worktree, &["status", "--porcelain"])?;
     Ok(output
@@ -7623,573 +3445,6 @@ fn read_worktree_metadata_document(worktree: &Path) -> Result<Option<toml::Value
     Ok(Some(parsed))
 }
 
-#[derive(Clone, Debug)]
-struct TraceRecord {
-    line_number: usize,
-    value: serde_json::Value,
-    run_id: String,
-    issue_id: Option<String>,
-    agent_run_id: Option<String>,
-    event_type: String,
-    ts: Option<String>,
-    ts_unix_ms: Option<u128>,
-}
-
-#[derive(Clone, Debug)]
-struct TraceRunSummary {
-    run_id: String,
-    issue_id: Option<String>,
-    event_count: usize,
-    first_ts: Option<String>,
-    last_ts: Option<String>,
-    last_event_type: Option<String>,
-    last_ts_unix_ms: Option<u128>,
-}
-
-fn cmd_trace(args: &mut [String]) -> Result<(), String> {
-    match args.get(1).map(String::as_str) {
-        Some("list") => {
-            let config = load_agentactr_config(None)?;
-            let trace_path = run_trace_path(&config)?;
-            let records = read_trace_records(&trace_path)?;
-            let summaries = summarize_trace_runs(&records);
-            println!("trace_path={}", trace_path.display());
-            println!("runs={}", summaries.len());
-            for summary in summaries {
-                println!(
-                    "run_id={} issue_id={} events={} first_ts={} last_ts={} last_event={}",
-                    summary.run_id,
-                    summary.issue_id.unwrap_or_else(|| "unknown".to_string()),
-                    summary.event_count,
-                    summary.first_ts.unwrap_or_else(|| "unknown".to_string()),
-                    summary.last_ts.unwrap_or_else(|| "unknown".to_string()),
-                    summary
-                        .last_event_type
-                        .unwrap_or_else(|| "unknown".to_string())
-                );
-            }
-            Ok(())
-        }
-        Some("show") => {
-            let run_id = args.get(2).ok_or("usage: agentactr trace show RUN_ID")?;
-            let config = load_agentactr_config(None)?;
-            let trace_path = run_trace_path(&config)?;
-            let records = read_trace_records(&trace_path)?
-                .into_iter()
-                .filter(|record| record.run_id == *run_id)
-                .collect::<Vec<_>>();
-            if records.is_empty() {
-                return Err(format!(
-                    "no trace events found for run `{run_id}` in {}",
-                    trace_path.display()
-                ));
-            }
-            let artifact_integrity = load_run_artifact_context(&config, run_id)
-                .and_then(|context| collect_artifact_integrity(&context))
-                .unwrap_or_else(|err| {
-                    serde_json::json!({
-                        "schema_version": "0.1",
-                        "run_id": run_id,
-                        "status": "unavailable",
-                        "verified": false,
-                        "error": err,
-                    })
-                });
-            print_trace_show(&trace_path, run_id, &records, Some(&artifact_integrity));
-            Ok(())
-        }
-        _ => Err("usage: agentactr trace list | trace show RUN_ID".to_string()),
-    }
-}
-
-fn read_trace_records(trace_path: &Path) -> Result<Vec<TraceRecord>, String> {
-    let content = match fs::read_to_string(trace_path) {
-        Ok(content) => content,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(format!("read trace events {}: {err}", trace_path.display())),
-    };
-    let mut records = Vec::new();
-    for (index, line) in content.lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let value = serde_json::from_str::<serde_json::Value>(line).map_err(|e| {
-            format!(
-                "parse trace event {} line {}: {e}",
-                trace_path.display(),
-                index + 1
-            )
-        })?;
-        let run_id = value
-            .get("run_id")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| {
-                format!(
-                    "trace event {} line {} is missing string run_id",
-                    trace_path.display(),
-                    index + 1
-                )
-            })?
-            .to_string();
-        let event_type = value
-            .get("event_type")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| {
-                format!(
-                    "trace event {} line {} is missing string event_type",
-                    trace_path.display(),
-                    index + 1
-                )
-            })?
-            .to_string();
-        records.push(TraceRecord {
-            line_number: index + 1,
-            run_id,
-            issue_id: value
-                .get("issue_id")
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string),
-            agent_run_id: value
-                .get("agent_run_id")
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string),
-            event_type,
-            ts: value
-                .get("ts")
-                .and_then(serde_json::Value::as_str)
-                .map(ToString::to_string),
-            ts_unix_ms: value
-                .get("ts_unix_ms")
-                .and_then(serde_json::Value::as_u64)
-                .map(u128::from),
-            value,
-        });
-    }
-    Ok(records)
-}
-
-fn summarize_trace_runs(records: &[TraceRecord]) -> Vec<TraceRunSummary> {
-    let mut summaries: BTreeMap<String, TraceRunSummary> = BTreeMap::new();
-    for record in records {
-        let summary = summaries
-            .entry(record.run_id.clone())
-            .or_insert_with(|| TraceRunSummary {
-                run_id: record.run_id.clone(),
-                issue_id: record.issue_id.clone(),
-                event_count: 0,
-                first_ts: record.ts.clone(),
-                last_ts: record.ts.clone(),
-                last_event_type: Some(record.event_type.clone()),
-                last_ts_unix_ms: record.ts_unix_ms,
-            });
-        summary.event_count += 1;
-        if summary.issue_id.is_none() {
-            summary.issue_id = record.issue_id.clone();
-        }
-        if summary.first_ts.is_none() {
-            summary.first_ts = record.ts.clone();
-        }
-        summary.last_ts = record.ts.clone().or_else(|| summary.last_ts.clone());
-        summary.last_event_type = Some(record.event_type.clone());
-        summary.last_ts_unix_ms = record.ts_unix_ms.or(summary.last_ts_unix_ms);
-    }
-    let mut out = summaries.into_values().collect::<Vec<_>>();
-    out.sort_by(|left, right| {
-        right
-            .last_ts_unix_ms
-            .cmp(&left.last_ts_unix_ms)
-            .then_with(|| left.run_id.cmp(&right.run_id))
-    });
-    out
-}
-
-fn print_trace_show(
-    trace_path: &Path,
-    run_id: &str,
-    records: &[TraceRecord],
-    artifact_integrity: Option<&serde_json::Value>,
-) {
-    let issue_id = records
-        .iter()
-        .find_map(|record| record.issue_id.clone())
-        .unwrap_or_else(|| "unknown".to_string());
-    println!("trace_path={}", trace_path.display());
-    println!("run_id={run_id}");
-    println!("issue_id={issue_id}");
-    println!("events={}", records.len());
-    if let Some(first) = records.first().and_then(|record| record.ts.as_ref()) {
-        println!("first_ts={first}");
-    }
-    if let Some(last) = records.last().and_then(|record| record.ts.as_ref()) {
-        println!("last_ts={last}");
-    }
-    print_trace_run_status(records);
-    print_trace_agent_last_events(records);
-    print_trace_failures(records);
-    print_trace_runtime_processes(records);
-    print_trace_github_rate_limits(records);
-    print_trace_artifacts(records);
-    print_trace_artifact_integrity(artifact_integrity);
-    println!("events:");
-    for record in records {
-        println!(
-            "  line={} ts={} agent={} event={}",
-            record.line_number,
-            record.ts.as_deref().unwrap_or("unknown"),
-            record.agent_run_id.as_deref().unwrap_or("root"),
-            record.event_type
-        );
-    }
-}
-
-fn print_trace_artifact_integrity(integrity: Option<&serde_json::Value>) {
-    let Some(integrity) = integrity else {
-        println!("artifact_integrity=unavailable");
-        return;
-    };
-    let status = integrity
-        .get("status")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("unknown");
-    let verified = integrity
-        .get("verified")
-        .and_then(serde_json::Value::as_bool)
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-    let children = integrity
-        .get("child_handoffs")
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0);
-    println!("artifact_integrity={status} verified={verified} child_handoffs={children}");
-    if let Some(prompt) = integrity.get("writer_prompt") {
-        println!(
-            "artifact_integrity_writer_prompt status={} expected_sha256={} actual_sha256={}",
-            json_display(prompt.get("status")),
-            json_display(prompt.get("expected_sha256")),
-            json_display(prompt.get("actual_sha256"))
-        );
-    }
-    if let Some(diff) = integrity.get("workspace_diff") {
-        println!(
-            "artifact_integrity_workspace_diff status={} expected_sha256={} actual_sha256={}",
-            json_display(diff.get("status")),
-            json_display(diff.get("expected_sha256")),
-            json_display(diff.get("actual_sha256"))
-        );
-    }
-    if let Some(plan) = integrity.get("merge_plan") {
-        println!(
-            "artifact_integrity_merge_plan status={} expected_sha256={} actual_sha256={}",
-            json_display(plan.get("status")),
-            json_display(plan.get("expected_sha256")),
-            json_display(plan.get("actual_sha256"))
-        );
-    }
-    if let Some(children) = integrity
-        .get("child_handoffs")
-        .and_then(serde_json::Value::as_array)
-    {
-        for child in children {
-            println!(
-                "artifact_integrity_child agent={} handoff_status={} prompt_status={}",
-                json_display(child.get("agent_run_id")),
-                json_display(child.pointer("/handoff/status")),
-                json_display(child.pointer("/prompt/status"))
-            );
-        }
-    }
-}
-
-fn print_trace_run_status(records: &[TraceRecord]) {
-    let status = records
-        .iter()
-        .rev()
-        .find(|record| record.event_type == "run.status.updated")
-        .and_then(|record| record.value.pointer("/payload/status"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("unknown");
-    println!("run_status={status}");
-}
-
-fn print_trace_agent_last_events(records: &[TraceRecord]) {
-    let mut by_agent = BTreeMap::<String, &TraceRecord>::new();
-    for record in records {
-        if let Some(agent) = &record.agent_run_id {
-            by_agent.insert(agent.clone(), record);
-        }
-    }
-    println!("agents={}", by_agent.len());
-    for (agent, record) in by_agent {
-        println!(
-            "agent={} last_event={} ts={}",
-            agent,
-            record.event_type,
-            record.ts.as_deref().unwrap_or("unknown")
-        );
-    }
-}
-
-fn print_trace_failures(records: &[TraceRecord]) {
-    let failures = records
-        .iter()
-        .filter(|record| record.event_type.ends_with(".failed") || record.event_type == "error")
-        .collect::<Vec<_>>();
-    println!("failures={}", failures.len());
-    for record in failures {
-        let error = record
-            .value
-            .pointer("/payload/error")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("unspecified");
-        println!(
-            "failure line={} event={} error={}",
-            record.line_number, record.event_type, error
-        );
-    }
-}
-
-fn print_trace_runtime_processes(records: &[TraceRecord]) {
-    let process_events = records
-        .iter()
-        .filter(|record| record.event_type.starts_with("runtime.process."))
-        .collect::<Vec<_>>();
-    println!("runtime_process_events={}", process_events.len());
-    for record in process_events {
-        let payload = record
-            .value
-            .get("payload")
-            .unwrap_or(&serde_json::Value::Null);
-        println!(
-            "runtime_process line={} kind={} agent={} root_pid={} process_group_id={} container_ref={} vm_ref={} memory_group_id={}",
-            record.line_number,
-            record.event_type,
-            record.agent_run_id.as_deref().unwrap_or("unknown"),
-            json_display(payload.pointer("/root_pid")),
-            json_display(payload.pointer("/process_group_id")),
-            json_display(payload.pointer("/container_ref")),
-            json_display(payload.pointer("/vm_ref")),
-            json_display(payload.pointer("/memory_group_id")),
-        );
-    }
-}
-
-fn print_trace_github_rate_limits(records: &[TraceRecord]) {
-    let rate_events = records
-        .iter()
-        .filter(|record| record.event_type == "github.rate_limit.updated")
-        .collect::<Vec<_>>();
-    println!("github_rate_limit_events={}", rate_events.len());
-    for record in rate_events {
-        let payload = record
-            .value
-            .get("payload")
-            .unwrap_or(&serde_json::Value::Null);
-        println!(
-            "github_rate_limit line={} status={} reason={} retry_after_ms={}",
-            record.line_number,
-            json_display(payload.get("status")),
-            json_display(payload.get("reason")),
-            json_display(payload.get("retry_after_ms")),
-        );
-    }
-}
-
-fn print_trace_artifacts(records: &[TraceRecord]) {
-    let artifact_events = records
-        .iter()
-        .filter(|record| {
-            matches!(
-                record.event_type.as_str(),
-                "context.manifest.written"
-                    | "adapter.version_reported"
-                    | "finalization.deferred"
-                    | "quality.rerun.completed"
-                    | "quality.rerun.failed"
-                    | "vcs.diff.recorded"
-                    | "vcs.merge_plan.recorded"
-                    | "vcs.status.read"
-            )
-        })
-        .collect::<Vec<_>>();
-    println!("artifact_events={}", artifact_events.len());
-    for record in artifact_events {
-        println!(
-            "artifact_event line={} event={} payload={}",
-            record.line_number,
-            record.event_type,
-            compact_json(
-                record
-                    .value
-                    .get("payload")
-                    .unwrap_or(&serde_json::Value::Null)
-            )
-        );
-    }
-}
-
-fn json_display(value: Option<&serde_json::Value>) -> String {
-    match value {
-        Some(serde_json::Value::String(value)) => value.clone(),
-        Some(serde_json::Value::Number(value)) => value.to_string(),
-        Some(serde_json::Value::Bool(value)) => value.to_string(),
-        Some(serde_json::Value::Null) | None => "none".to_string(),
-        Some(value) => compact_json(value),
-    }
-}
-
-fn compact_json(value: &serde_json::Value) -> String {
-    serde_json::to_string(value).unwrap_or_else(|_| "unrenderable".to_string())
-}
-
-struct DebugBundleReport {
-    bundle_dir: PathBuf,
-    copied_files: Vec<String>,
-    trace_events: usize,
-    redacted: bool,
-}
-
-fn cmd_debug(args: &mut [String]) -> Result<(), String> {
-    match args.get(1).map(String::as_str) {
-        Some("bundle") => {
-            let run_id = args.get(2).ok_or("usage: agentactr debug bundle RUN_ID")?;
-            let config = load_agentactr_config(None)?;
-            let report = create_debug_bundle(&config, run_id)?;
-            println!("debug_bundle={}", report.bundle_dir.display());
-            println!("copied_files={}", report.copied_files.len());
-            println!("trace_events={}", report.trace_events);
-            println!("redacted={}", report.redacted);
-            Ok(())
-        }
-        _ => Err("usage: agentactr debug bundle RUN_ID".to_string()),
-    }
-}
-
-fn create_debug_bundle(
-    config: &AgentactrConfig,
-    run_id: &str,
-) -> Result<DebugBundleReport, String> {
-    let context = load_run_artifact_context(config, run_id)?;
-    let bundle_dir = debug_bundle_dir(config, run_id)?;
-    let artifacts_dir = bundle_dir.join("artifacts");
-    let traces_dir = bundle_dir.join("traces");
-    create_dir(&artifacts_dir)?;
-    create_dir(&traces_dir)?;
-
-    let redacted = config.observability.redact_secrets;
-    let mut copied_files = Vec::new();
-    copy_debug_artifacts(
-        &context.artifact_dir,
-        &artifacts_dir,
-        &bundle_dir,
-        redacted,
-        &mut copied_files,
-    )?;
-
-    let trace_path = run_trace_path(config)?;
-    let trace_records = read_trace_records(&trace_path)?;
-    let run_records = trace_records
-        .iter()
-        .filter(|record| record.run_id == run_id)
-        .cloned()
-        .collect::<Vec<_>>();
-    let trace_slice_path = traces_dir.join("events.jsonl");
-    write_trace_slice(&trace_slice_path, &run_records, redacted)?;
-    copied_files.push(relative_debug_path(&bundle_dir, &trace_slice_path)?);
-
-    let trace_summary_path = traces_dir.join("summary.txt");
-    write_file(
-        &trace_summary_path,
-        &render_trace_summary(&trace_path, run_id, &run_records),
-    )?;
-    copied_files.push(relative_debug_path(&bundle_dir, &trace_summary_path)?);
-
-    let artifact_integrity = collect_artifact_integrity(&context)?;
-    let artifact_integrity_path = bundle_dir.join("artifact_integrity.json");
-    write_file(
-        &artifact_integrity_path,
-        &serde_json::to_string_pretty(&artifact_integrity)
-            .map_err(|e| format!("render artifact integrity: {e}"))?,
-    )?;
-    copied_files.push(relative_debug_path(&bundle_dir, &artifact_integrity_path)?);
-
-    let vcs_context = validate_run_worktree_scope(config, &context).map(|worktree| {
-        let mut context = context.clone();
-        context.worktree = worktree;
-        context
-    });
-    match vcs_context.and_then(|context| collect_vcs_status(&context)) {
-        Ok(status) => {
-            let vcs_json = bundle_dir.join("vcs_status.json");
-            write_file(
-                &vcs_json,
-                &serde_json::to_string_pretty(&status.to_json())
-                    .map_err(|e| format!("render VCS status: {e}"))?,
-            )?;
-            copied_files.push(relative_debug_path(&bundle_dir, &vcs_json)?);
-            let vcs_text = bundle_dir.join("vcs_status.txt");
-            write_file(&vcs_text, &render_vcs_status_text(&status))?;
-            copied_files.push(relative_debug_path(&bundle_dir, &vcs_text)?);
-        }
-        Err(err) => {
-            let path = bundle_dir.join("vcs_status.error.txt");
-            write_file(&path, &format!("{err}\n"))?;
-            copied_files.push(relative_debug_path(&bundle_dir, &path)?);
-        }
-    }
-
-    let manifest_path = bundle_dir.join("bundle_manifest.json");
-    let manifest = serde_json::json!({
-        "schema_version": "0.1",
-        "run_id": context.run_id,
-        "repo": context.repo,
-        "issue": context.issue,
-        "generated_at": iso_timestamp_from_epoch_millis(current_epoch_millis()),
-        "source_artifact_dir": context.artifact_dir.display().to_string(),
-        "source_context_manifest": context.manifest_path.display().to_string(),
-        "source_trace_path": trace_path.display().to_string(),
-        "redacted": redacted,
-        "trace_events": run_records.len(),
-        "artifact_integrity": artifact_integrity,
-        "files": copied_files,
-        "limitations": [
-            "bootstrap-local bundle; replay remains a milestone command",
-            "merge plan is read-only; commit and GitHub mutations remain disabled",
-            "GitHub mutations are not performed by debug bundling"
-        ]
-    });
-    write_file(
-        &manifest_path,
-        &serde_json::to_string_pretty(&manifest)
-            .map_err(|e| format!("render debug bundle manifest: {e}"))?,
-    )?;
-    let copied_files = manifest
-        .get("files")
-        .and_then(serde_json::Value::as_array)
-        .map(|files| {
-            files
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-
-    Ok(DebugBundleReport {
-        bundle_dir,
-        copied_files,
-        trace_events: run_records.len(),
-        redacted,
-    })
-}
-
-fn collect_artifact_integrity(context: &RunArtifactContext) -> Result<serde_json::Value, String> {
-    artifacts::collect_artifact_integrity(&ArtifactIntegrityContext {
-        run_id: &context.run_id,
-        artifact_dir: &context.artifact_dir,
-    })
-}
-
 #[cfg(test)]
 fn verify_artifact_digest(
     artifact_root: &Path,
@@ -8218,148 +3473,7 @@ fn normalize_path_lexically(path: &Path) -> Option<PathBuf> {
     Some(normalized)
 }
 
-fn copy_debug_artifacts(
-    source: &Path,
-    target: &Path,
-    bundle_root: &Path,
-    redacted: bool,
-    copied_files: &mut Vec<String>,
-) -> Result<(), String> {
-    let source_metadata = fs::symlink_metadata(source)
-        .map_err(|e| format!("inspect debug source {}: {e}", source.display()))?;
-    if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
-        return Err(format!(
-            "run artifact directory is missing or not a directory: {}",
-            source.display()
-        ));
-    }
-    for entry in fs::read_dir(source).map_err(|e| format!("read {}: {e}", source.display()))? {
-        let entry = entry.map_err(|e| format!("read {} entry: {e}", source.display()))?;
-        let path = entry.path();
-        let target_path = target.join(entry.file_name());
-        let metadata = fs::symlink_metadata(&path)
-            .map_err(|e| format!("inspect debug artifact {}: {e}", path.display()))?;
-        if metadata.file_type().is_symlink() {
-            record_debug_symlink(&path, &target_path, bundle_root, copied_files)?;
-        } else if metadata.is_dir() {
-            create_dir(&target_path)?;
-            copy_debug_artifacts(&path, &target_path, bundle_root, redacted, copied_files)?;
-        } else if metadata.is_file() {
-            copy_debug_file(&path, &target_path, redacted)?;
-            copied_files.push(relative_debug_path(bundle_root, &target_path)?);
-        }
-    }
-    Ok(())
-}
-
-fn record_debug_symlink(
-    source: &Path,
-    target_path: &Path,
-    bundle_root: &Path,
-    copied_files: &mut Vec<String>,
-) -> Result<(), String> {
-    let metadata_path = target_path.with_file_name(format!(
-        "{}.symlink_skipped.json",
-        target_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("artifact")
-    ));
-    let symlink_target = fs::read_link(source)
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|_| "<unreadable>".to_string());
-    let payload = serde_json::json!({
-        "schema_version": "0.1",
-        "action": "skipped_symlink",
-        "source": source.display().to_string(),
-        "symlink_target": symlink_target,
-        "reason": "debug bundles do not follow symlinked run artifacts",
-    });
-    write_file(
-        &metadata_path,
-        &serde_json::to_string_pretty(&payload)
-            .map_err(|e| format!("render skipped symlink metadata: {e}"))?,
-    )?;
-    copied_files.push(relative_debug_path(bundle_root, &metadata_path)?);
-    Ok(())
-}
-
-fn copy_debug_file(source: &Path, target: &Path, redacted: bool) -> Result<(), String> {
-    if let Some(parent) = target.parent() {
-        create_dir(parent)?;
-    }
-    let bytes =
-        fs::read(source).map_err(|e| format!("read debug source {}: {e}", source.display()))?;
-    if redacted {
-        match String::from_utf8(bytes.clone()) {
-            Ok(text) => write_file(target, &redact_debug_text(&text)),
-            Err(_) => {
-                fs::copy(source, target).map_err(|e| {
-                    format!(
-                        "copy binary debug artifact {} to {}: {e}",
-                        source.display(),
-                        target.display()
-                    )
-                })?;
-                Ok(())
-            }
-        }
-    } else {
-        fs::write(target, bytes)
-            .map_err(|e| format!("write debug artifact {}: {e}", target.display()))
-    }
-}
-
-fn write_trace_slice(path: &Path, records: &[TraceRecord], redacted: bool) -> Result<(), String> {
-    let mut out = String::new();
-    for record in records {
-        if redacted {
-            let mut value = record.value.clone();
-            redact_json_value(&mut value);
-            out.push_str(&compact_json(&value));
-        } else {
-            out.push_str(&compact_json(&record.value));
-        }
-        out.push('\n');
-    }
-    write_file(path, &out)
-}
-
-fn render_trace_summary(trace_path: &Path, run_id: &str, records: &[TraceRecord]) -> String {
-    let mut out = String::new();
-    out.push_str(&format!("trace_path={}\n", trace_path.display()));
-    out.push_str(&format!("run_id={run_id}\n"));
-    out.push_str(&format!("events={}\n", records.len()));
-    if let Some(issue_id) = records.iter().find_map(|record| record.issue_id.as_deref()) {
-        out.push_str(&format!("issue_id={issue_id}\n"));
-    }
-    if let Some(first) = records.first().and_then(|record| record.ts.as_deref()) {
-        out.push_str(&format!("first_ts={first}\n"));
-    }
-    if let Some(last) = records.last().and_then(|record| record.ts.as_deref()) {
-        out.push_str(&format!("last_ts={last}\n"));
-    }
-    let status = records
-        .iter()
-        .rev()
-        .find(|record| record.event_type == "run.status.updated")
-        .and_then(|record| record.value.pointer("/payload/status"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("unknown");
-    out.push_str(&format!("run_status={status}\n"));
-    for record in records {
-        out.push_str(&format!(
-            "event line={} ts={} agent={} event={}\n",
-            record.line_number,
-            record.ts.as_deref().unwrap_or("unknown"),
-            record.agent_run_id.as_deref().unwrap_or("root"),
-            record.event_type
-        ));
-    }
-    out
-}
-
-fn render_vcs_status_text(status: &VcsStatus) -> String {
+pub(crate) fn render_vcs_status_text(status: &VcsStatus) -> String {
     let mut out = String::new();
     out.push_str(&format!("run_id={}\n", status.run_id));
     out.push_str(&format!("repo={}\n", status.repo));
@@ -8392,7 +3506,7 @@ fn render_vcs_status_text(status: &VcsStatus) -> String {
     out
 }
 
-fn print_vcs_inventory(entries: &[VcsInventoryEntry]) {
+pub(crate) fn print_vcs_inventory(entries: &[VcsInventoryEntry]) {
     println!("vcs_worktrees={}", entries.len());
     for entry in entries {
         println!(
@@ -8429,7 +3543,7 @@ fn print_vcs_inventory(entries: &[VcsInventoryEntry]) {
     }
 }
 
-fn print_vcs_inventory_json(entries: &[VcsInventoryEntry]) -> Result<(), String> {
+pub(crate) fn print_vcs_inventory_json(entries: &[VcsInventoryEntry]) -> Result<(), String> {
     let payload = serde_json::json!({
         "schema_version": "0.1",
         "worktrees": entries.iter().map(VcsInventoryEntry::to_json).collect::<Vec<_>>(),
@@ -8479,7 +3593,7 @@ fn vcs_show_payload(
     }))
 }
 
-fn print_vcs_show(
+pub(crate) fn print_vcs_show(
     config: &AgentactrConfig,
     status: &VcsStatus,
     last_run_status: &str,
@@ -8518,7 +3632,7 @@ fn print_vcs_show(
     Ok(())
 }
 
-fn print_vcs_show_json(
+pub(crate) fn print_vcs_show_json(
     config: &AgentactrConfig,
     status: &VcsStatus,
     last_run_status: &str,
@@ -8531,104 +3645,6 @@ fn print_vcs_show_json(
     Ok(())
 }
 
-fn relative_debug_path(root: &Path, path: &Path) -> Result<String, String> {
-    path.strip_prefix(root)
-        .map(|path| path.display().to_string())
-        .map_err(|e| {
-            format!(
-                "debug bundle path {} is not under {}: {e}",
-                path.display(),
-                root.display()
-            )
-        })
-}
-
-fn redact_debug_text(input: &str) -> String {
-    input
-        .lines()
-        .map(redact_debug_line)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn redact_debug_line(line: &str) -> String {
-    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(line) {
-        redact_json_value(&mut value);
-        return compact_json(&value);
-    }
-    let lower = line.to_ascii_lowercase();
-    let sensitive = [
-        "authorization",
-        "bearer ",
-        "api_key",
-        "apikey",
-        "access_token",
-        "refresh_token",
-        "codex_api_key",
-        "github_token",
-        "gh_token",
-        "password",
-        "secret",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle));
-    if !sensitive {
-        return line.to_string();
-    }
-    if let Some((prefix, _)) = line.split_once('=') {
-        return format!("{prefix}=<redacted>");
-    }
-    if let Some((prefix, _)) = line.split_once(':') {
-        return format!("{prefix}: <redacted>");
-    }
-    "<redacted>".to_string()
-}
-
-fn redact_json_value(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            for (key, value) in map.iter_mut() {
-                if is_sensitive_debug_key(key) {
-                    *value = serde_json::Value::String("<redacted>".to_string());
-                } else {
-                    redact_json_value(value);
-                }
-            }
-        }
-        serde_json::Value::Array(values) => {
-            for value in values {
-                redact_json_value(value);
-            }
-        }
-        serde_json::Value::String(value) => {
-            let lower = value.to_ascii_lowercase();
-            if lower.starts_with("bearer ") || lower.starts_with("sk-") {
-                *value = "<redacted>".to_string();
-            }
-        }
-        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
-    }
-}
-
-fn is_sensitive_debug_key(key: &str) -> bool {
-    let lower = key.to_ascii_lowercase();
-    [
-        "authorization",
-        "api_key",
-        "apikey",
-        "access_token",
-        "refresh_token",
-        "codex_api_key",
-        "github_token",
-        "gh_token",
-        "password",
-        "secret",
-        "token",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
-}
-
 fn cmd_repo(args: &mut [String]) -> Result<(), String> {
     if args.get(1).map(String::as_str) != Some("inspect") {
         return Err("usage: agentactr repo inspect".to_string());
@@ -8636,61 +3652,6 @@ fn cmd_repo(args: &mut [String]) -> Result<(), String> {
     let config = load_agentactr_config(None)?;
     let inspection = configured_repo_inspection(Path::new("."), &config);
     print_repo_inspection(&inspection);
-    Ok(())
-}
-
-fn cmd_quality(args: &mut [String]) -> Result<(), String> {
-    if args.get(1).map(String::as_str) == Some("run") {
-        let run_id = args.get(2).ok_or("usage: agentactr quality run RUN_ID")?;
-        let config = load_agentactr_config(None)?;
-        let mut context = load_run_artifact_context(&config, run_id)?;
-        context.worktree = validate_run_worktree_scope(&config, &context)?;
-        let inspection = configured_repo_inspection(&context.worktree, &config);
-        let ts = current_epoch_millis();
-        let report_path = context
-            .artifact_dir
-            .join(format!("quality_report.rerun.{ts}.txt"));
-        let result = run_quality_gates_to_report(
-            &inspection,
-            &context.worktree,
-            &report_path,
-            &config.quality.domain_gate_opt_ins,
-        );
-        let event_type = if result.is_ok() {
-            "quality.rerun.completed"
-        } else {
-            "quality.rerun.failed"
-        };
-        append_run_event(
-            &RunEventContext::root(&config, &context.run_id, &context.repo, &context.issue),
-            event_type,
-            serde_json::json!({
-                "worktree": context.worktree.display().to_string(),
-                "report": report_path.display().to_string(),
-                "selected_stack": inspection.primary_stack.as_str(),
-                "quality_gate_count": inspection.quality_plan.len(),
-                "error": result.as_ref().err().cloned(),
-            }),
-        )?;
-        return match result {
-            Ok(()) => {
-                println!("quality report: {}", report_path.display());
-                Ok(())
-            }
-            Err(err) => Err(err),
-        };
-    }
-    if args.get(1).map(String::as_str) != Some("plan") {
-        return Err("usage: agentactr quality plan | quality run RUN_ID".to_string());
-    }
-    let config = load_agentactr_config(None)?;
-    let inspection = configured_repo_inspection(Path::new("."), &config);
-    print_repo_inspection(&inspection);
-    if inspection.quality_plan.is_empty() {
-        println!("quality plan: none; supported stack was not detected");
-    } else {
-        print_quality_plan(&inspection);
-    }
     Ok(())
 }
 
@@ -8719,107 +3680,6 @@ fn cmd_merge(args: &mut [String]) -> Result<(), String> {
     }
 }
 
-fn cmd_vcs(args: &mut [String]) -> Result<(), String> {
-    if args.get(1).map(String::as_str) == Some("list") {
-        let config = load_agentactr_config(None)?;
-        let entries = collect_vcs_inventory(&config)?;
-        match args.get(2).map(String::as_str) {
-            None => {
-                print_vcs_inventory(&entries);
-                return Ok(());
-            }
-            Some("--json") => {
-                print_vcs_inventory_json(&entries)?;
-                return Ok(());
-            }
-            _ => return Err("usage: agentactr vcs list [--json]".to_string()),
-        }
-    }
-    if args.get(1).map(String::as_str) == Some("show") {
-        let run_id = args
-            .get(2)
-            .ok_or("usage: agentactr vcs show RUN_ID [--json]")?;
-        let config = load_agentactr_config(None)?;
-        let mut context = load_run_artifact_context(&config, run_id)?;
-        context.worktree = validate_run_worktree_scope(&config, &context)?;
-        let status = collect_vcs_status(&context)?;
-        let trace_records = read_trace_records(&run_trace_path(&config)?)?;
-        let last_run_status = latest_run_status(&trace_records, run_id);
-        match args.get(3).map(String::as_str) {
-            None => {
-                print_vcs_show(&config, &status, &last_run_status)?;
-                return Ok(());
-            }
-            Some("--json") => {
-                print_vcs_show_json(&config, &status, &last_run_status)?;
-                return Ok(());
-            }
-            _ => return Err("usage: agentactr vcs show RUN_ID [--json]".to_string()),
-        }
-    }
-    if args.get(1).map(String::as_str) == Some("status") {
-        let run_id = args.get(2).ok_or("usage: agentactr vcs status RUN_ID")?;
-        let config = load_agentactr_config(None)?;
-        let mut context = load_run_artifact_context(&config, run_id)?;
-        context.worktree = validate_run_worktree_scope(&config, &context)?;
-        let status = collect_vcs_status(&context)?;
-        print_vcs_status(&status);
-        append_run_event(
-            &RunEventContext::root(&config, &context.run_id, &context.repo, &context.issue),
-            "vcs.status.read",
-            status.to_json(),
-        )?;
-        return Ok(());
-    }
-    if args.get(1).map(String::as_str) == Some("diff") {
-        let run_id = args
-            .get(2)
-            .ok_or("usage: agentactr vcs diff RUN_ID [--output PATH]")?;
-        if args.len() != 3
-            && !(args.len() == 5 && args.get(3).map(String::as_str) == Some("--output"))
-        {
-            return Err("usage: agentactr vcs diff RUN_ID [--output PATH]".to_string());
-        }
-        let output_path = flag_value(args, "--output");
-        let config = load_agentactr_config(None)?;
-        let mut context = load_run_artifact_context(&config, run_id)?;
-        context.worktree = validate_run_worktree_scope(&config, &context)?;
-        let diff = collect_workspace_diff(&context)?;
-        let (patch_path, metadata_path) =
-            record_workspace_diff_artifacts(&config, &context, &diff, output_path.as_deref())?;
-        println!("workspace_diff={}", patch_path.display());
-        println!("workspace_diff_metadata={}", metadata_path.display());
-        println!("run_id={}", diff.run_id);
-        println!("base_commit={}", diff.base_commit);
-        println!("current_commit={}", diff.current_commit);
-        println!("patch_bytes={}", diff.patch.len());
-        println!("touched_file_count={}", diff.touched_files.len());
-        println!("untracked_file_count={}", diff.untracked_files.len());
-        println!("is_empty={}", diff.is_empty);
-        return Ok(());
-    }
-    if let Some(command @ ("commit" | "cleanup")) = args.get(1).map(String::as_str) {
-        return not_implemented(&format!("vcs {command}"));
-    }
-    if args.get(1).map(String::as_str) != Some("prepare") {
-        return Err(
-            "usage: agentactr vcs prepare --issue 123 [--repo OWNER/REPO] | vcs list [--json] | vcs show RUN_ID [--json] | vcs status RUN_ID | vcs diff RUN_ID [--output PATH]"
-                .to_string(),
-        );
-    }
-    let issue = flag_value(args, "--issue").ok_or("missing --issue")?;
-    let repo_override = flag_value(args, "--repo");
-    let config = load_agentactr_config(repo_override.as_deref())?;
-    validate_github_repo(&config.tracker.repo)?;
-    validate_issue_number(&issue)?;
-    let run_id = new_run_id(&issue);
-    let worktree =
-        LocalGitAdapter.prepare_worktree(&run_id, &config.tracker.repo, &issue, &config.vcs)?;
-    println!("run id: {run_id}");
-    println!("worktree: {}", worktree.display());
-    Ok(())
-}
-
 fn cmd_memory(args: &mut [String]) -> Result<(), String> {
     match args.get(1).map(String::as_str) {
         Some("status") => {
@@ -8834,7 +3694,7 @@ fn cmd_memory(args: &mut [String]) -> Result<(), String> {
     }
 }
 
-fn not_implemented(command: &str) -> Result<(), String> {
+pub(crate) fn not_implemented(command: &str) -> Result<(), String> {
     Err(format!(
         "`agentactr {command}` is specified but not implemented in this milestone"
     ))
@@ -8893,7 +3753,7 @@ fn merge_gitignore_additions(existing: &str, generated: &str) -> Option<String> 
     Some(updated)
 }
 
-fn flag_value(args: &[String], flag: &str) -> Option<String> {
+pub(crate) fn flag_value(args: &[String], flag: &str) -> Option<String> {
     args.windows(2)
         .find_map(|w| (w[0] == flag).then(|| w[1].clone()))
 }
@@ -8905,7 +3765,7 @@ fn flag_values(args: &[String], flag: &str) -> Vec<String> {
         .collect()
 }
 
-fn has_flag(args: &[String], flag: &str) -> bool {
+pub(crate) fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|a| a == flag)
 }
 
@@ -9289,143 +4149,6 @@ impl GithubFinalizationSetting {
     }
 }
 
-fn detect_credentials(config: &AgentactrConfig) -> DetectedCredentials {
-    DetectedCredentials {
-        github_token: env::var("GITHUB_TOKEN").is_ok(),
-        gh_token: env::var("GH_TOKEN").is_ok(),
-        configured_github_token: env::var(&config.tracker.token_env).is_ok(),
-        google_api_key: env::var("GOOGLE_API_KEY").is_ok(),
-        hf_token: env::var("HF_TOKEN").is_ok(),
-        openai_api_key: env::var(&config.codex.openai_api_key_env).is_ok(),
-        codex_google_mcp: codex_mcp_server_configured("GoogleDeveloperAPI"),
-        codex_hf_mcp: codex_mcp_server_configured("hf-mcp-server"),
-        codex_github_remote_mcp: codex_mcp_server_configured("github_remote"),
-    }
-}
-
-fn codex_mcp_server_configured(server: &str) -> bool {
-    codex_config_paths()
-        .iter()
-        .any(|path| codex_config_mcp_server_enabled(path, server))
-}
-
-fn codex_config_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Ok(path) = codex_user_config_path() {
-        paths.push(path);
-    }
-    paths.push(PathBuf::from(".codex").join("config.toml"));
-    paths
-}
-
-fn codex_user_config_path() -> Result<PathBuf, String> {
-    if let Some(codex_home) = env::var_os("CODEX_HOME") {
-        return Ok(PathBuf::from(codex_home).join("config.toml"));
-    }
-    let home = env::var_os("HOME").ok_or("HOME is not set; cannot locate Codex user config")?;
-    Ok(PathBuf::from(home).join(".codex").join("config.toml"))
-}
-
-fn codex_config_mcp_server_enabled(path: &Path, server: &str) -> bool {
-    let Ok(content) = fs::read_to_string(path) else {
-        return false;
-    };
-    let Ok(parsed) = parse_toml_document(&content) else {
-        return false;
-    };
-    let Some(server_config) = toml_path(&parsed, &format!("mcp_servers.{server}")) else {
-        return false;
-    };
-    server_config
-        .get("enabled")
-        .and_then(toml::Value::as_bool)
-        .unwrap_or(true)
-}
-
-fn print_mcp_summary(creds: &DetectedCredentials) {
-    println!("MCP:");
-    println!("  agentactr: enabled, required");
-    println!("  openaiDeveloperDocs: enabled, no auth");
-    println!(
-        "  GoogleDeveloperAPI: {}",
-        if creds.google_api_key {
-            "enabled, GOOGLE_API_KEY detected"
-        } else if creds.codex_google_mcp {
-            "enabled, existing Codex MCP config detected"
-        } else {
-            "disabled, missing GOOGLE_API_KEY"
-        }
-    );
-    println!(
-        "  hf-mcp-server: {}",
-        if creds.hf_token {
-            "enabled, HF_TOKEN detected"
-        } else if creds.codex_hf_mcp {
-            "enabled, existing Codex MCP config detected"
-        } else {
-            "disabled, missing HF_TOKEN/OAuth"
-        }
-    );
-    println!(
-        "  github_remote: {}",
-        if creds.github_any() {
-            "enabled read-only, GitHub token detected"
-        } else if creds.codex_github_remote_mcp {
-            "enabled read-only, existing Codex MCP config detected"
-        } else {
-            "disabled, missing GITHUB_TOKEN/GH_TOKEN"
-        }
-    );
-    println!("  github_remote write tools: disabled");
-}
-
-fn print_security_summary(config: &AgentactrConfig) {
-    println!("Security defaults:");
-    println!(
-        "  human_intervention.mode = {}",
-        config.human_intervention.mode
-    );
-    println!("  codex.approval_policy = {}", config.codex.approval_policy);
-    println!("  github.finalization = {}", config.github.finalization);
-    println!("  merge.mode = {}", config.merge.mode);
-    println!("  merge.push = {}", config.merge.push);
-    println!(
-        "  remote GitHub write MCP tools = {}",
-        config.mcp.remote_github_write_tools
-    );
-}
-
-fn print_memory_status() {
-    println!("Linux memory:");
-    let config = load_agentactr_config(None)
-        .map(|config| config.linux_memory)
-        .unwrap_or_else(|_| AgentactrConfig::strict_defaults("OWNER/REPO").linux_memory);
-    for line in LinuxMemoryController::new(&config).status_lines() {
-        println!("{line}");
-    }
-}
-
-fn print_execution_status(config: &AgentactrConfig) {
-    println!("Execution backend:");
-    match resolve_execution_backend(&config.execution) {
-        Ok(decision) => {
-            println!("  configured = {}", decision.configured);
-            println!("  effective = {}", decision.effective.as_str());
-            println!(
-                "  strict_memory_required = {}",
-                decision.strict_memory_required
-            );
-            println!("  reason = {}", decision.reason);
-            if decision.effective == ExecutionBackend::DockerLinuxVm {
-                check_command(&config.execution.docker.command, &["version"]);
-                check_docker_info(config);
-                check_docker_runtime_tools(config);
-            }
-        }
-        Err(err) => println!("  error: {err}"),
-    }
-}
-
 fn require_execution_backend_ready(config: &AgentactrConfig) -> Result<(), String> {
     let decision = resolve_execution_backend(&config.execution)?;
     println!("  configured = {}", decision.configured);
@@ -9493,13 +4216,6 @@ fn require_docker_backend_ready(config: &AgentactrConfig) -> Result<(), String> 
 
 fn require_docker_runtime_tools(config: &AgentactrConfig) -> Result<(), String> {
     docker_runtime_tools_probe(config).map(|_| println!("  ok: Docker runtime tools"))
-}
-
-fn check_docker_runtime_tools(config: &AgentactrConfig) {
-    match docker_runtime_tools_probe(config) {
-        Ok(()) => println!("  ok: Docker runtime tools include codex and agentactr"),
-        Err(err) => println!("  warning: {err}"),
-    }
 }
 
 fn docker_runtime_tools_probe(config: &AgentactrConfig) -> Result<(), String> {
@@ -9613,30 +4329,6 @@ fn docker_image_readiness_action(
     }
 }
 
-fn check_docker_info(config: &AgentactrConfig) {
-    let docker = &config.execution.docker.command;
-    match Command::new(docker)
-        .arg("info")
-        .arg("--format")
-        .arg("{{.OSType}}")
-        .output()
-    {
-        Ok(output) if output.status.success() => {
-            let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if value == "linux" {
-                println!("  ok: Docker engine OS linux");
-            } else {
-                println!("  warning: Docker engine OS is {value}, expected linux");
-            }
-        }
-        Ok(output) => println!(
-            "  warning: Docker daemon unavailable: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ),
-        Err(err) => println!("  warning: Docker daemon unavailable: {err}"),
-    }
-}
-
 fn print_memory_pressure() {
     if cfg!(target_os = "linux") {
         match fs::read_to_string("/proc/pressure/memory") {
@@ -9676,36 +4368,6 @@ fn print_quality_plan(inspection: &RepoInspection) {
     }
 }
 
-fn print_domain_summary(config: &AgentactrConfig, inspection: &RepoInspection) {
-    println!("Domain graph:");
-    println!(
-        "  schema_version = {}",
-        inspection.domain_graph.schema_version
-    );
-    println!("  domains = {}", inspection.domain_profiles.len());
-    println!("  quality_gates = {}", inspection.domain_quality_plan.len());
-    println!("  artifact = {}", config.architecture.domain_graph_artifact);
-    if inspection.domain_profiles.is_empty() {
-        println!("  detected = none");
-    } else {
-        for profile in &inspection.domain_profiles {
-            println!(
-                "  detected: {} kind={} confidence={} evidence={}",
-                profile.id,
-                profile.kind,
-                profile.confidence,
-                profile.evidence.len()
-            );
-        }
-    }
-    let agents_policy = if Path::new("AGENTS.md").exists() {
-        "present"
-    } else {
-        "absent; run agentactr doctor --fix-agents to generate"
-    };
-    println!("AGENTS.md: {agents_policy}");
-}
-
 fn print_adapter_versions(
     vcs: &dyn VersionControl,
     tracker: &dyn IssueTracker,
@@ -9740,28 +4402,6 @@ fn print_adapter_versions(
         runtime_capabilities.parallel_read_only_child_agents
     );
     reports
-}
-
-fn print_doctor_adapter_versions(config: &AgentactrConfig) -> Result<(), String> {
-    let reports = configured_adapter_version_reports(config)?;
-    print_adapter_version_reports(&reports);
-    Ok(())
-}
-
-fn configured_adapter_version_reports(
-    config: &AgentactrConfig,
-) -> Result<Vec<AdapterVersionReport>, String> {
-    let vcs = LocalGitAdapter;
-    let tracker = GithubRestAdapter::new(
-        PathBuf::from(&config.observability.artifact_root).join("doctor"),
-        &config.tracker,
-    );
-    let runtime = CodexRuntimeAdapter::new(&config.codex)?;
-    Ok(vec![
-        vcs.version_report(),
-        tracker.version_report(),
-        runtime.version_report(),
-    ])
 }
 
 fn print_adapter_version_reports(reports: &[AdapterVersionReport]) {
@@ -10148,22 +4788,6 @@ fn fail_on_blocking_repo_findings(context: &EffectiveRepositoryContext) -> Resul
     Ok(())
 }
 
-fn check_path(path: &str) {
-    if Path::new(path).exists() {
-        println!("ok: {path}");
-    } else {
-        println!("missing: {path}");
-    }
-}
-
-fn check_env(name: &str, label: &str) {
-    if env::var(name).is_ok() {
-        println!("ok: {label} ({name})");
-    } else {
-        println!("missing: {label} ({name})");
-    }
-}
-
 fn require_env_any(names: &[&str], label: &str) -> Result<String, String> {
     for name in names {
         if env::var(name).is_ok() {
@@ -10184,247 +4808,6 @@ fn preferred_github_token_env_names(configured: &str) -> Vec<String> {
     names
 }
 
-fn check_optional_env(name: &str, label: &str) {
-    if env::var(name).is_ok() {
-        println!("ok: {label} ({name})");
-    } else {
-        println!("not set: {label} ({name})");
-    }
-}
-
-fn check_github_token_governance(config: &AgentactrConfig) {
-    println!("GitHub token governance:");
-    let configured = &config.tracker.token_env;
-    let configured_set = env::var(configured).is_ok();
-    let generic_set = env::var("GITHUB_TOKEN").is_ok() || env::var("GH_TOKEN").is_ok();
-    if configured_set && configured != "GITHUB_TOKEN" && configured != "GH_TOKEN" {
-        println!("  ok: configured token env `{configured}` is available and preferred");
-    } else if generic_set {
-        println!(
-            "  warning: using generic PAT-style token env; GitHub App installation auth is preferred for production automation"
-        );
-    } else {
-        println!("  missing: no configured GitHub token detected");
-    }
-}
-
-struct GithubApiVersionSupport {
-    version: &'static str,
-    end_of_support: Option<&'static str>,
-}
-
-const SUPPORTED_GITHUB_API_VERSIONS: &[GithubApiVersionSupport] = &[
-    GithubApiVersionSupport {
-        version: "2026-03-10",
-        end_of_support: None,
-    },
-    GithubApiVersionSupport {
-        version: "2022-11-28",
-        end_of_support: Some("March 10, 2028"),
-    },
-];
-
-fn github_api_version_support(version: &str) -> Option<&'static GithubApiVersionSupport> {
-    SUPPORTED_GITHUB_API_VERSIONS
-        .iter()
-        .find(|support| support.version == version)
-}
-
-fn check_github_api_version(config: &AgentactrConfig) {
-    let configured = config.tracker.github_api_version.as_str();
-    if let Some(support) = github_api_version_support(configured) {
-        if let Some(end_of_support) = support.end_of_support {
-            println!("ok: GitHub REST API version {configured} (supported until {end_of_support})");
-        } else {
-            println!("ok: GitHub REST API version {configured} (support end not yet scheduled)");
-        }
-    } else {
-        let supported = SUPPORTED_GITHUB_API_VERSIONS
-            .iter()
-            .map(|support| support.version)
-            .collect::<Vec<_>>()
-            .join(", ");
-        println!(
-            "warning: GitHub REST API version {configured} is not in this SDK's supported set ({})",
-            supported
-        );
-    }
-}
-
-fn check_github_lifecycle_labels(config: &AgentactrConfig) {
-    println!("GitHub lifecycle labels:");
-    if env::var(&config.tracker.token_env).is_err()
-        && env::var("GITHUB_TOKEN").is_err()
-        && env::var("GH_TOKEN").is_err()
-    {
-        println!("  skipped: GitHub token unavailable");
-        return;
-    }
-    let artifact_dir = PathBuf::from(&config.observability.artifact_root).join("doctor");
-    if let Err(err) = fs::create_dir_all(&artifact_dir) {
-        println!(
-            "  skipped: doctor artifact directory unavailable ({}): {err}",
-            artifact_dir.display()
-        );
-        return;
-    }
-    let tracker = GithubRestAdapter::new(artifact_dir, &config.tracker);
-    for label in [
-        &config.tracker.claim_label,
-        &config.tracker.running_label,
-        &config.tracker.failed_label,
-        &config.tracker.done_label,
-    ] {
-        match tracker.check_label_exists(&config.tracker.repo, label) {
-            Ok(()) => println!("  ok: label `{label}` exists"),
-            Err(err) => println!("  missing: label `{label}` unavailable: {err}"),
-        }
-    }
-}
-
-fn check_sqlite_store(config: &AgentactrConfig) {
-    match validate_sqlite_store(config) {
-        Ok(path) => println!("ok: SQLite run store openable ({})", path.display()),
-        Err(err) => println!("missing: SQLite run store unavailable: {err}"),
-    }
-}
-
-fn validate_sqlite_store(config: &AgentactrConfig) -> Result<PathBuf, String> {
-    use sqlx_sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-
-    let sqlite_path = resolve_config_path(&config.observability.sqlite)?;
-    let parent = sqlite_path
-        .parent()
-        .ok_or_else(|| format!("SQLite path has no parent: {}", sqlite_path.display()))?;
-    fs::create_dir_all(parent)
-        .map_err(|e| format!("create SQLite parent {}: {e}", parent.display()))?;
-    let probe_path = parent.join(format!(
-        ".agentactr-doctor-{}-{}.sqlite",
-        std::process::id(),
-        current_epoch_millis()
-    ));
-    let url = format!("sqlite://{}", probe_path.display());
-    let options = url
-        .parse::<SqliteConnectOptions>()
-        .map_err(|e| format!("configure SQLite probe {url}: {e}"))?
-        .create_if_missing(true);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| format!("start SQLite probe runtime: {e}"))?;
-    runtime.block_on(async {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(options)
-            .await
-            .map_err(|e| format!("open SQLite probe {}: {e}", probe_path.display()))?;
-        sqlx_core::query::query("SELECT 1")
-            .execute(&pool)
-            .await
-            .map_err(|e| format!("query SQLite probe {}: {e}", probe_path.display()))?;
-        pool.close().await;
-        Ok::<_, String>(())
-    })?;
-    let _ = fs::remove_file(&probe_path);
-    let _ = fs::remove_file(probe_path.with_extension("sqlite-shm"));
-    let _ = fs::remove_file(probe_path.with_extension("sqlite-wal"));
-    Ok(sqlite_path)
-}
-
-fn check_otlp(config: &AgentactrConfig) {
-    if !config.observability.otel_enabled {
-        println!("ok: OTLP disabled by config");
-        return;
-    }
-    match validate_otlp_endpoint(&config.observability.otel_endpoint) {
-        Ok(()) => println!(
-            "ok: OTLP endpoint reachable ({})",
-            config.observability.otel_endpoint
-        ),
-        Err(err) => println!("warning: OTLP endpoint unavailable: {err}"),
-    }
-}
-
-fn validate_otlp_endpoint(endpoint: &str) -> Result<(), String> {
-    let url = reqwest::Url::parse(endpoint).map_err(|e| format!("parse `{endpoint}`: {e}"))?;
-    let host = url
-        .host_str()
-        .ok_or_else(|| format!("OTLP endpoint `{endpoint}` has no host"))?;
-    let port = url
-        .port_or_known_default()
-        .ok_or_else(|| format!("OTLP endpoint `{endpoint}` has no port"))?;
-    let mut addrs = (host, port)
-        .to_socket_addrs()
-        .map_err(|e| format!("resolve {host}:{port}: {e}"))?;
-    let addr = addrs
-        .next()
-        .ok_or_else(|| format!("resolve {host}:{port}: no addresses"))?;
-    TcpStream::connect_timeout(&addr, Duration::from_secs(2))
-        .map_err(|e| format!("connect {host}:{port}: {e}"))?;
-    Ok(())
-}
-
-fn check_workspace_permissions(config: &AgentactrConfig) {
-    println!("Workspace permissions:");
-    for (label, value) in [
-        ("cwd", "."),
-        ("workspace.root", config.workspace.root.as_str()),
-        ("vcs.worktree_root", config.vcs.worktree_root.as_str()),
-        (
-            "observability.artifact_root",
-            config.observability.artifact_root.as_str(),
-        ),
-        (
-            "observability.debug_bundle_root",
-            config.observability.debug_bundle_root.as_str(),
-        ),
-    ] {
-        match validate_writable_path(value) {
-            Ok(path) => println!("  ok: {label} writable ({})", path.display()),
-            Err(err) => println!("  missing: {label} not writable: {err}"),
-        }
-    }
-}
-
-fn validate_writable_path(value: &str) -> Result<PathBuf, String> {
-    let path = resolve_config_path(value)?;
-    let probe_dir = if path.exists() {
-        if path.is_dir() {
-            path.clone()
-        } else {
-            path.parent()
-                .ok_or_else(|| format!("{} has no parent", path.display()))?
-                .to_path_buf()
-        }
-    } else {
-        path.parent()
-            .ok_or_else(|| format!("{} has no parent", path.display()))?
-            .to_path_buf()
-    };
-    fs::create_dir_all(&probe_dir).map_err(|e| format!("create {}: {e}", probe_dir.display()))?;
-    let probe = probe_dir.join(format!(
-        ".agentactr-doctor-write-{}-{}",
-        std::process::id(),
-        current_epoch_millis()
-    ));
-    fs::write(&probe, b"ok").map_err(|e| format!("write {}: {e}", probe.display()))?;
-    fs::remove_file(&probe).map_err(|e| format!("remove {}: {e}", probe.display()))?;
-    Ok(path)
-}
-
-fn check_command(program: &str, args: &[&str]) {
-    let status = Command::new(program)
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    match status {
-        Ok(s) if s.success() => println!("ok: command `{program}`"),
-        Ok(s) => println!("warning: command `{program}` exited with {s}"),
-        Err(_) => println!("missing: command `{program}`"),
-    }
-}
-
 fn require_command(program: &str, args: &[&str]) -> Result<(), String> {
     let status = Command::new(program)
         .args(args)
@@ -10438,24 +4821,6 @@ fn require_command(program: &str, args: &[&str]) -> Result<(), String> {
         }
         Ok(s) => Err(format!("command `{program}` exited with {s}")),
         Err(e) => Err(format!("missing command `{program}`: {e}")),
-    }
-}
-
-fn check_codex_login_status(command: &str, api_key_env: &str) {
-    if env::var(api_key_env).is_ok() {
-        println!("ok: Codex exec API-key auth ({api_key_env})");
-        return;
-    }
-    let status = Command::new(command)
-        .arg("login")
-        .arg("status")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    match status {
-        Ok(s) if s.success() => println!("ok: {command} login status"),
-        Ok(_) => println!("missing: Codex auth; run `codex login` for subscription auth or set `{api_key_env}` for codex exec automation"),
-        Err(_) => println!("missing: {command} login status unavailable"),
     }
 }
 
@@ -10562,61 +4927,6 @@ fn require_supported_codex_transport(config: &AgentactrConfig) -> Result<CodexMo
             println!("  fallback = agentactr config set codex.mode cli_json");
             Err(CodexSdkAdapter::unsupported_message())
         }
-    }
-}
-
-fn check_codex_transport(config: &AgentactrConfig) -> Option<CodexMode> {
-    println!("preflight: Codex transport");
-    match CodexMode::parse(&config.codex.mode) {
-        Ok(CodexMode::CliJsonExec) => {
-            println!("ok: codex.mode=cli_json transport=codex exec --json");
-            Some(CodexMode::CliJsonExec)
-        }
-        Ok(CodexMode::AppServer) => {
-            println!("missing: codex.mode=app_server transport=Codex app-server");
-            println!("  status = feature-gated, adapter stub fails closed");
-            println!(
-                "  configured_transport = {}",
-                config.codex.app_server_transport
-            );
-            println!(
-                "  experimental_api = {}",
-                config.codex.app_server_experimental_api
-            );
-            println!("  fallback_mode = {}", config.codex.fallback_mode);
-            println!("  fallback = agentactr config set codex.mode cli_json");
-            None
-        }
-        Ok(CodexMode::CodexSdk) => {
-            println!("missing: codex.mode=codex_sdk transport=Codex SDK");
-            println!("  status = feature-gated, TypeScript @openai/codex-sdk bridge pending");
-            println!("  configured_bridge = {}", config.codex.sdk_bridge);
-            println!("  fallback_mode = {}", config.codex.fallback_mode);
-            println!("  requirement = Node.js 18+ and SDK sidecar contract tests");
-            println!("  fallback = agentactr config set codex.mode cli_json");
-            None
-        }
-        Err(err) => {
-            println!("missing: Codex transport config invalid: {err}");
-            None
-        }
-    }
-}
-
-fn check_codex_exec_capacity(config: &AgentactrConfig) {
-    match codex_exec_capacity_probe(config, Duration::from_secs(60)) {
-        Ok(()) => println!("ok: Codex exec capacity probe"),
-        Err(err) => println!("missing: Codex exec capacity probe failed: {err}"),
-    }
-}
-
-fn check_codex_project_trust(worktree: &Path) {
-    match codex_project_trusted(worktree) {
-        Ok(true) => println!("ok: Codex project trust"),
-        Ok(false) => println!(
-            "missing: Codex project trust; run `agentactr doctor --trust-codex-project` from this repo root if you explicitly allow updating Codex user config"
-        ),
-        Err(err) => println!("missing: Codex project trust check failed: {err}"),
     }
 }
 
@@ -10929,85 +5239,6 @@ fn require_codex_project_config_ready(
     Ok(())
 }
 
-fn codex_project_trusted(worktree: &Path) -> Result<bool, String> {
-    let config_path = codex_user_config_path()?;
-    let content = match fs::read_to_string(&config_path) {
-        Ok(content) => content,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(err) => {
-            return Err(format!(
-                "read Codex user config {}: {err}",
-                config_path.display()
-            ))
-        }
-    };
-    let parsed = parse_toml_document(&content)
-        .map_err(|e| format!("parse Codex user config {}: {e}", config_path.display()))?;
-    let Some(projects) = parsed.get("projects").and_then(toml::Value::as_table) else {
-        return Ok(false);
-    };
-    let worktree = canonical_path(worktree);
-    for (path, value) in projects {
-        let trust_level = value
-            .get("trust_level")
-            .and_then(toml::Value::as_str)
-            .unwrap_or_default();
-        if trust_level != "trusted" {
-            continue;
-        }
-        let trusted_path = PathBuf::from(path);
-        let trusted_path = canonical_path(&trusted_path);
-        if worktree == trusted_path || worktree.starts_with(&trusted_path) {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn trust_current_codex_project() -> Result<PathBuf, String> {
-    let config_path = codex_user_config_path()?;
-    let project_path = canonical_path(Path::new("."));
-    let content = match fs::read_to_string(&config_path) {
-        Ok(content) => content,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => String::new(),
-        Err(err) => {
-            return Err(format!(
-                "read Codex user config {}: {err}",
-                config_path.display()
-            ))
-        }
-    };
-    let updated = render_codex_project_trust(&content, &project_path)?;
-    if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("create Codex config dir {}: {e}", parent.display()))?;
-    }
-    fs::write(&config_path, updated)
-        .map_err(|e| format!("write Codex user config {}: {e}", config_path.display()))?;
-    Ok(config_path)
-}
-
-fn render_codex_project_trust(content: &str, project_path: &Path) -> Result<String, String> {
-    let mut document = if content.trim().is_empty() {
-        toml_edit::DocumentMut::new()
-    } else {
-        content
-            .parse::<toml_edit::DocumentMut>()
-            .map_err(|e| format!("parse Codex user config: {e}"))?
-    };
-    let project_key = project_path.display().to_string();
-    set_toml_edit_path(
-        &mut document,
-        &["projects", project_key.as_str(), "trust_level"],
-        toml_edit::value("trusted"),
-    )?;
-    Ok(document.to_string())
-}
-
-fn canonical_path(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-}
-
 fn require_agentactr_mcp_ready(timeout: Duration) -> Result<(), String> {
     require_command("agentactr", &["--help"])?;
     let mut child = Command::new("agentactr")
@@ -11143,51 +5374,6 @@ fn wait_for_process_group_exit(child: &mut std::process::Child, grace: Duration)
     false
 }
 
-#[cfg(unix)]
-fn configure_quality_process_group(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-    unsafe {
-        command.pre_exec(|| {
-            unsafe extern "C" {
-                fn setpgid(pid: i32, pgid: i32) -> i32;
-            }
-            if setpgid(0, 0) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-}
-
-#[cfg(not(unix))]
-fn configure_quality_process_group(_command: &mut Command) {}
-
-#[cfg(unix)]
-fn terminate_process_group(child: &std::process::Child, signal: &str) {
-    let _ = Command::new("kill")
-        .arg(format!("-{signal}"))
-        .arg(format!("-{}", child.id()))
-        .status();
-}
-
-#[cfg(not(unix))]
-fn terminate_process_group(_child: &std::process::Child, _signal: &str) {}
-
-#[cfg(unix)]
-fn quality_process_group_alive(process_group_id: u32) -> bool {
-    Command::new("kill")
-        .arg("-0")
-        .arg(format!("-{process_group_id}"))
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-#[cfg(not(unix))]
-fn quality_process_group_alive(_process_group_id: u32) -> bool {
-    false
-}
-
 fn run_status(cmd: &mut Command) -> Result<(), String> {
     let status = cmd.status().map_err(|e| format!("run command: {e}"))?;
     if status.success() {
@@ -11245,7 +5431,7 @@ fn print_run_banner(
     println!("  agentactr config set github.finalization require_human_review");
 }
 
-fn new_run_id(issue: &str) -> String {
+pub(crate) fn new_run_id(issue: &str) -> String {
     let epoch_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -11258,7 +5444,9 @@ fn read_repo_from_config() -> Option<String> {
     find_config_value(&content, "tracker.repo")
 }
 
-fn load_agentactr_config(repo_override: Option<&str>) -> Result<AgentactrConfig, String> {
+pub(crate) fn load_agentactr_config(
+    repo_override: Option<&str>,
+) -> Result<AgentactrConfig, String> {
     let repo = repo_override
         .map(ToString::to_string)
         .or_else(read_repo_from_config)
@@ -12034,112 +6222,6 @@ fn parse_toml_document(content: &str) -> Result<toml::Value, String> {
     toml::from_str::<toml::Table>(content)
         .map(toml::Value::Table)
         .map_err(|e| e.to_string())
-}
-
-fn find_config_value(content: &str, dotted_key: &str) -> Option<String> {
-    let parsed = parse_toml_document(content).ok()?;
-    let current = toml_path(&parsed, dotted_key)?;
-    current
-        .as_str()
-        .map(ToString::to_string)
-        .or_else(|| Some(current.to_string()))
-}
-
-fn set_config_value(path: &str, dotted_key: &str, value: &str) -> Result<(), String> {
-    if !CONFIG_KEY_VALUES.contains(&dotted_key) {
-        return Err(format!("unsupported config key `{dotted_key}`"));
-    }
-    let content = fs::read_to_string(path).map_err(|e| format!("read {path}: {e}"))?;
-    let mut document = content
-        .parse::<toml_edit::DocumentMut>()
-        .map_err(|e| format!("parse {path}: {e}"))?;
-    let segments = dotted_key.split('.').collect::<Vec<_>>();
-    if segments.len() < 2 {
-        return Err("key must use section.key form".to_string());
-    }
-    let value = canonical_config_set_value(dotted_key, value)?;
-    let value = parse_toml_edit_scalar(&value)?;
-    set_toml_edit_path(&mut document, &segments, value)?;
-    let updated = document.to_string();
-    let parsed = parse_toml_document(&updated).map_err(|e| format!("parse updated {path}: {e}"))?;
-    let repo =
-        find_config_value(&updated, "tracker.repo").unwrap_or_else(|| "OWNER/REPO".to_string());
-    let mut config = AgentactrConfig::strict_defaults(repo);
-    merge_config_from_toml(&mut config, &parsed)?;
-    config.codex.validate_milestone_policy()?;
-    let rendered = render_agentactr_toml(&config);
-    fs::write(path, rendered).map_err(|e| format!("write {path}: {e}"))
-}
-
-fn canonical_config_set_value(dotted_key: &str, value: &str) -> Result<String, String> {
-    match dotted_key {
-        "codex.mode" => Ok(CodexMode::parse(value)?.as_str().to_string()),
-        "codex.app_server_transport" => {
-            Ok(CodexAppServerTransport::parse(value)?.as_str().to_string())
-        }
-        "codex.sdk_bridge" => Ok(CodexSdkBridge::parse(value)?.as_str().to_string()),
-        "codex.fallback_mode" => Ok(CodexFallbackMode::parse(value)?.as_str().to_string()),
-        "github.standard_label_policy" => canonical_static_value(
-            value,
-            GITHUB_STANDARD_LABEL_POLICY_VALUES,
-            "github.standard_label_policy",
-        ),
-        "github.project_automation" => canonical_static_value(
-            value,
-            GITHUB_PROJECT_AUTOMATION_VALUES,
-            "github.project_automation",
-        ),
-        _ => Ok(value.to_string()),
-    }
-}
-
-fn canonical_static_value(value: &str, allowed: &[&str], key: &str) -> Result<String, String> {
-    if allowed.contains(&value) {
-        Ok(value.to_string())
-    } else {
-        Err(format!(
-            "unsupported {key} value `{value}`; expected one of {}",
-            allowed.join("|")
-        ))
-    }
-}
-
-fn parse_toml_edit_scalar(value: &str) -> Result<toml_edit::Item, String> {
-    match value {
-        "true" => Ok(toml_edit::value(true)),
-        "false" => Ok(toml_edit::value(false)),
-        v if v.parse::<i64>().is_ok() => Ok(toml_edit::value(v.parse::<i64>().unwrap_or_default())),
-        v if v.starts_with('[') || v.starts_with('{') => v
-            .parse::<toml_edit::Value>()
-            .map(toml_edit::Item::Value)
-            .map_err(|e| format!("parse TOML value `{v}`: {e}")),
-        v => Ok(toml_edit::value(v)),
-    }
-}
-
-fn set_toml_edit_path(
-    root: &mut toml_edit::DocumentMut,
-    segments: &[&str],
-    value: toml_edit::Item,
-) -> Result<(), String> {
-    let mut current = root.as_item_mut();
-    for segment in &segments[..segments.len() - 1] {
-        if current.get(segment).is_none() {
-            current[segment] = toml_edit::Item::Table(toml_edit::Table::new());
-        }
-        current = current
-            .get_mut(segment)
-            .ok_or_else(|| format!("missing TOML section `{segment}`"))?;
-    }
-    let key = segments.last().ok_or("empty TOML path")?;
-    if !current.is_table() && !current.is_inline_table() {
-        return Err(format!(
-            "TOML section `{}` is not a table",
-            segments[..segments.len() - 1].join(".")
-        ));
-    }
-    current[key] = value;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -13100,8 +7182,10 @@ redact_secrets = false
         assert!(!static_cli.contains("FROM --platform=$BUILDPLATFORM rust:"));
         assert!(!static_cli.contains("FROM --platform=$TARGETPLATFORM rust:"));
         for workflow in [release, nightly] {
-            assert!(workflow.contains("depot/setup-action@v1"));
-            assert!(workflow.contains("depot/build-push-action@v1"));
+            assert!(workflow
+                .contains("depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1"));
+            assert!(workflow
+                .contains("depot/build-push-action@5f3b3c2e5a00f0093de47f657aeaefcedff27d18 # v1"));
             assert!(workflow.contains("project: ${{ vars.DEPOT_PROJECT_ID }}"));
             assert!(workflow.contains("token: ${{ secrets.DEPOT_TOKEN }}"));
             assert!(!workflow.contains("docker/setup-buildx-action@"));
@@ -13110,6 +7194,99 @@ redact_secrets = false
         }
         assert!(!release.contains("docker/setup-qemu-action@"));
         assert!(nightly.contains("docker/setup-qemu-action@"));
+    }
+
+    #[test]
+    fn release_workflow_keeps_native_binary_shipping_disabled() {
+        let release = include_str!("../../../.github/workflows/release.yml");
+        let gates = include_str!("../../../scripts/check-github-workflow-gates.sh");
+
+        for needle in [
+            "build-binaries:",
+            "if: ${{ false }}",
+            "Native CLI binaries are not attached to this release; build locally from source.",
+            "Native binary archives are intentionally omitted from this release.",
+            ".agentactr/image-metadata/*.json",
+        ] {
+            assert!(
+                release.contains(needle),
+                "release workflow missing `{needle}`"
+            );
+        }
+        assert!(!release.contains("actions/download-artifact@v7"));
+
+        for needle in [
+            "if: \\$\\{\\{ false \\}\\}",
+            "Native CLI binaries are not attached",
+            "Native binary archives are intentionally omitted",
+            "\\.agentactr/image-metadata/\\*\\.json",
+        ] {
+            assert!(gates.contains(needle), "workflow gates missing `{needle}`");
+        }
+    }
+
+    #[test]
+    fn github_action_refs_are_immutable_sha_pinned() {
+        let workflows = [
+            (
+                "agentactr-dogfood.yml",
+                include_str!("../../../.github/workflows/agentactr-dogfood.yml"),
+            ),
+            (
+                "architecture.yml",
+                include_str!("../../../.github/workflows/architecture.yml"),
+            ),
+            (
+                "build.yml",
+                include_str!("../../../.github/workflows/build.yml"),
+            ),
+            ("ci.yml", include_str!("../../../.github/workflows/ci.yml")),
+            (
+                "docker-main.yml",
+                include_str!("../../../.github/workflows/docker-main.yml"),
+            ),
+            (
+                "nightly.yml",
+                include_str!("../../../.github/workflows/nightly.yml"),
+            ),
+            (
+                "release.yml",
+                include_str!("../../../.github/workflows/release.yml"),
+            ),
+            (
+                "security.yml",
+                include_str!("../../../.github/workflows/security.yml"),
+            ),
+        ];
+        for (workflow, content) in workflows {
+            for (line_number, line) in content.lines().enumerate() {
+                let trimmed = line.trim_start();
+                let Some(action_ref) = trimmed
+                    .strip_prefix("- uses: ")
+                    .or_else(|| trimmed.strip_prefix("uses: "))
+                else {
+                    continue;
+                };
+                let action_ref = action_ref.split('#').next().unwrap_or_default().trim_end();
+                let Some((_, sha)) = action_ref.rsplit_once('@') else {
+                    panic!(
+                        "{workflow}:{} action reference is missing @SHA: {action_ref}",
+                        line_number + 1
+                    );
+                };
+                assert_eq!(
+                    sha.len(),
+                    40,
+                    "{workflow}:{} action ref is not a 40-character SHA: {action_ref}",
+                    line_number + 1
+                );
+                assert!(
+                    sha.chars().all(|ch| ch.is_ascii_hexdigit()),
+                    "{workflow}:{} action ref is not hex SHA pinned: {action_ref}",
+                    line_number + 1
+                );
+            }
+        }
     }
 
     #[test]
@@ -13639,114 +7816,6 @@ fallback_mode = "cli_json"
     }
 
     #[test]
-    fn mcp_initialize_negotiates_latest_and_legacy_protocols() {
-        let latest = handle_mcp_json_rpc(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#,
-        )
-        .unwrap();
-        assert!(latest.contains(r#""protocolVersion":"2025-11-25""#));
-
-        let legacy = handle_mcp_json_rpc(
-            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}"#,
-        )
-        .unwrap();
-        assert!(legacy.contains(r#""protocolVersion":"2024-11-05""#));
-    }
-
-    #[test]
-    fn mcp_issue_read_uses_explicit_artifact_root() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let root = env::temp_dir().join(format!("agentactr-mcp-test-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-        fs::write(
-            root.join("github_issue.json"),
-            r#"{"title":"from-env-root"}"#,
-        )
-        .unwrap();
-        env::set_var("AGENTACTR_ARTIFACT_ROOT", &root);
-
-        let response = handle_mcp_json_rpc(
-            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agentactr.issue.read","arguments":{}}}"#,
-        )
-        .unwrap();
-
-        env::remove_var("AGENTACTR_ARTIFACT_ROOT");
-        assert!(response.contains("from-env-root"));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn mcp_issue_read_is_run_scoped_when_run_id_is_supplied() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let root = env::temp_dir().join(format!(
-            "agentactr-mcp-run-scoped-test-{}",
-            std::process::id()
-        ));
-        let old_run = root.join("run-old");
-        let new_run = root.join("run-new");
-        fs::create_dir_all(&old_run).unwrap();
-        fs::create_dir_all(&new_run).unwrap();
-        fs::write(old_run.join("github_issue.json"), r#"{"title":"old"}"#).unwrap();
-        fs::write(new_run.join("github_issue.json"), r#"{"title":"new"}"#).unwrap();
-        env::set_var("AGENTACTR_ARTIFACT_ROOT", &root);
-
-        let scoped = handle_mcp_json_rpc(
-            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agentactr.issue.read","arguments":{"run_id":"run-old"}}}"#,
-        )
-        .unwrap();
-        let unscoped = handle_mcp_json_rpc(
-            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"agentactr.issue.read","arguments":{}}}"#,
-        )
-        .unwrap();
-
-        env::remove_var("AGENTACTR_ARTIFACT_ROOT");
-        assert!(scoped.contains(r#"\"title\":\"old\""#));
-        assert!(!scoped.contains(r#"\"title\":\"new\""#));
-        assert!(unscoped.contains("isError\":true"));
-        assert!(unscoped.contains("run-scoped"));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn mcp_artifact_read_rejects_non_segment_run_id() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let root = env::temp_dir().join(format!(
-            "agentactr-mcp-run-scope-reject-test-{}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        env::set_var("AGENTACTR_ARTIFACT_ROOT", &root);
-
-        let response = handle_mcp_json_rpc(
-            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"agentactr.artifact.read","arguments":{"run_id":"../../escape"}}}"#,
-        )
-        .unwrap();
-
-        env::remove_var("AGENTACTR_ARTIFACT_ROOT");
-        assert!(response.contains("isError\":true"));
-        assert!(response.contains("path separators are not allowed"));
-        assert!(!response.contains("entries="));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn mcp_trace_read_uses_explicit_trace_path() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let root = env::temp_dir().join(format!("agentactr-mcp-trace-test-{}", std::process::id()));
-        fs::create_dir_all(&root).unwrap();
-        let trace_path = root.join("events.jsonl");
-        fs::write(&trace_path, "{}\n").unwrap();
-        env::set_var("AGENTACTR_TRACE_PATH", &trace_path);
-
-        let text = mcp_trace_text(&serde_json::json!({}));
-
-        env::remove_var("AGENTACTR_TRACE_PATH");
-        assert!(text.contains("bytes="));
-        assert!(text.contains(&trace_path.display().to_string()));
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
     fn append_run_event_writes_replayable_jsonl() {
         let root = env::temp_dir().join(format!(
             "agentactr-trace-event-test-{}-{}",
@@ -13908,11 +7977,49 @@ fallback_mode = "cli_json"
     }
 
     #[test]
+    fn vcs_apply_helper_checks_and_applies_recorded_patch() {
+        let root = env::temp_dir().join(format!(
+            "agentactr-vcs-apply-test-{}-{}",
+            std::process::id(),
+            new_run_id("vcs-apply")
+        ));
+        fs::create_dir_all(&root).unwrap();
+        run_git_test_command(&root, &["init"]);
+        run_git_test_command(
+            &root,
+            &["config", "user.email", "agentactr@example.invalid"],
+        );
+        run_git_test_command(&root, &["config", "user.name", "Agent Actr"]);
+        fs::write(root.join("file.txt"), "before\n").unwrap();
+        run_git_test_command(&root, &["add", "file.txt"]);
+        run_git_test_command(&root, &["commit", "-m", "initial"]);
+        let patch = root.with_extension("patch");
+        fs::write(
+            &patch,
+            "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-before\n+after\n",
+        )
+        .unwrap();
+
+        let checked = apply_recorded_patch(&root, &patch, true, false, false, false).unwrap();
+        assert!(!checked.applied);
+        assert_eq!(checked.status, "patch_applies_cleanly");
+        let applied = apply_recorded_patch(&root, &patch, false, true, false, false).unwrap();
+        assert!(applied.applied);
+        assert_eq!(
+            fs::read_to_string(root.join("file.txt")).unwrap(),
+            "after\n"
+        );
+        let _ = fs::remove_file(patch);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn clap_help_tree_renders_top_level_and_nested_commands() {
         let top = render_generated_help(&[]).unwrap();
         assert!(top.contains("Usage: agentactr [COMMAND]"));
         assert!(top.contains("Commands:"));
         assert!(top.contains("run"));
+        assert!(top.contains("bootstrap"));
         assert!(top.contains("vcs"));
         assert!(top.contains("completions"));
         assert!(top.contains("docs"));
@@ -13943,6 +8050,10 @@ fallback_mode = "cli_json"
         assert!(docs_cli_markdown.contains("Command: agentactr docs cli-markdown"));
         assert!(docs_cli_markdown.contains("Usage: cli-markdown [OPTIONS]"));
         assert!(docs_cli_markdown.contains("--output <PATH>"));
+
+        let bootstrap =
+            render_generated_help(&["bootstrap".to_string(), "project".to_string()]).unwrap();
+        assert!(bootstrap.contains("--stack <python|golang|rust|typescript|pulumi|terraform|sql>"));
 
         let config_set = render_generated_help(&["config".to_string(), "set".to_string()]).unwrap();
         assert!(config_set.contains("linux_memory.oom_policy"));
@@ -14030,6 +8141,14 @@ fallback_mode = "cli_json"
         assert_eq!(docs.matches("### `agentactr finalize`").count(), 1);
         assert!(!docs.contains("### `agentactr finalize RUN_ID --approve`"));
         assert!(!docs.contains("### `agentactr finalize RUN_ID --reject --reason REASON`"));
+        for (line_number, line) in docs.lines().enumerate() {
+            assert_eq!(
+                line.trim_end(),
+                line,
+                "CLI Markdown docs contain trailing whitespace on generated line {}",
+                line_number + 1
+            );
+        }
 
         let committed = include_str!("../../../docs/cli/reference.md");
         assert_eq!(
@@ -14164,7 +8283,7 @@ fallback_mode = "cli_json"
 
     #[test]
     fn menu_inventory_is_read_only_and_references_exact_commands() {
-        let payload = menu_json_payload();
+        let payload = crate::command_catalog::menu_json_payload();
         assert_eq!(payload["schema_version"], "0.1");
         assert_eq!(payload["mode"], "bootstrap_read_only");
         assert_eq!(payload["automation_surface"], "agentactr commands --json");
@@ -14178,13 +8297,13 @@ fallback_mode = "cli_json"
             .iter()
             .any(|action| action["equivalent_command"] == "agentactr run issue --repo OWNER/REPO --issue 123 [--human-intervention fail-closed|interactive|review-required] [--codex-approval never|on-request] [--github-finalization automatic_after_quality_gates|require_human_review|disabled] [--dry-run]"));
 
-        let mut text_args = vec!["menu".to_string()];
-        cmd_menu(&mut text_args).unwrap();
-        let mut json_args = vec!["menu".to_string(), "--json".to_string()];
-        cmd_menu(&mut json_args).unwrap();
-        let mut bad_args = vec!["menu".to_string(), "--run".to_string()];
+        let text_args = vec!["menu".to_string()];
+        cmd_menu(&text_args).unwrap();
+        let json_args = vec!["menu".to_string(), "--json".to_string()];
+        cmd_menu(&json_args).unwrap();
+        let bad_args = vec!["menu".to_string(), "--run".to_string()];
         assert_eq!(
-            cmd_menu(&mut bad_args).unwrap_err(),
+            cmd_menu(&bad_args).unwrap_err(),
             "usage: agentactr menu [--json]"
         );
     }
@@ -14201,290 +8320,6 @@ fallback_mode = "cli_json"
                 "unexpected error for vcs {command}: {err}"
             );
         }
-    }
-
-    #[test]
-    fn trace_records_parse_and_summarize_runs_without_mutating_trace() {
-        let root = env::temp_dir().join(format!(
-            "agentactr-trace-list-test-{}-{}",
-            std::process::id(),
-            new_run_id("trace")
-        ));
-        fs::create_dir_all(&root).unwrap();
-        let trace_path = root.join("events.jsonl");
-        fs::write(
-            &trace_path,
-            [
-                serde_json::json!({
-                    "run_id": "run-1",
-                    "issue_id": "github:OWNER/REPO#1",
-                    "agent_run_id": null,
-                    "event_type": "run.status.updated",
-                    "ts": "2026-01-01T00:00:00.000Z",
-                    "ts_unix_ms": 1,
-                    "payload": {"status": "started"}
-                })
-                .to_string(),
-                serde_json::json!({
-                    "run_id": "run-2",
-                    "issue_id": "github:OWNER/REPO#2",
-                    "agent_run_id": "agent-2",
-                    "event_type": "agent.completed",
-                    "ts": "2026-01-01T00:00:02.000Z",
-                    "ts_unix_ms": 3,
-                    "payload": {}
-                })
-                .to_string(),
-                serde_json::json!({
-                    "run_id": "run-1",
-                    "issue_id": "github:OWNER/REPO#1",
-                    "agent_run_id": "agent-1",
-                    "event_type": "phase.completed",
-                    "ts": "2026-01-01T00:00:01.000Z",
-                    "ts_unix_ms": 2,
-                    "payload": {"phase": "quality"}
-                })
-                .to_string(),
-            ]
-            .join("\n"),
-        )
-        .unwrap();
-        let before = fs::read_to_string(&trace_path).unwrap();
-
-        let records = read_trace_records(&trace_path).unwrap();
-        let summaries = summarize_trace_runs(&records);
-        print_trace_show(
-            &trace_path,
-            "run-1",
-            &records
-                .iter()
-                .filter(|record| record.run_id == "run-1")
-                .cloned()
-                .collect::<Vec<_>>(),
-            None,
-        );
-
-        let after = fs::read_to_string(&trace_path).unwrap();
-        assert_eq!(before, after);
-        assert_eq!(records.len(), 3);
-        assert_eq!(summaries[0].run_id, "run-2");
-        assert_eq!(summaries[1].run_id, "run-1");
-        assert_eq!(summaries[1].event_count, 2);
-        assert_eq!(
-            summaries[1].last_event_type.as_deref(),
-            Some("phase.completed")
-        );
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn debug_bundle_aggregates_artifacts_and_redacted_trace_without_mutation() {
-        let root = env::temp_dir().join(format!(
-            "agentactr-debug-bundle-test-{}-{}",
-            std::process::id(),
-            new_run_id("debug")
-        ));
-        let artifacts = root.join("artifacts").join("run-1");
-        let debug_root = root.join("debug");
-        let worktree = root.join("worktree");
-        fs::create_dir_all(&artifacts).unwrap();
-        fs::create_dir_all(&worktree).unwrap();
-        fs::write(
-            artifacts.join("context_manifest.json"),
-            serde_json::json!({
-                "run_id": "run-1",
-                "repo": "OWNER/REPO",
-                "issue": "42",
-                "worktree": {
-                    "path": worktree.display().to_string(),
-                    "base_commit": "abc123",
-                    "run_id": "run-1"
-                }
-            })
-            .to_string(),
-        )
-        .unwrap();
-        fs::write(
-            artifacts.join("github_issue.headers"),
-            "authorization: Bearer github-secret\nx-ratelimit-remaining: 42\n",
-        )
-        .unwrap();
-        fs::write(artifacts.join("quality_report.txt"), "quality ok\n").unwrap();
-        let diff_patch = "diff --git a/file.txt b/file.txt\nindex abc..def 100644\n";
-        fs::write(artifacts.join("workspace.diff.patch"), diff_patch).unwrap();
-        fs::write(
-            artifacts.join("workspace.diff.metadata.json"),
-            serde_json::json!({
-                "schema_version": "0.1",
-                "artifact": artifacts.join("workspace.diff.patch").display().to_string(),
-                "patch_sha256": format!("sha256:{}", sha256_hex_bytes(diff_patch.as_bytes())),
-                "patch_bytes": diff_patch.len(),
-                "touched_file_count": 1,
-                "untracked_file_count": 0,
-                "includes_untracked_file_bodies": false
-            })
-            .to_string(),
-        )
-        .unwrap();
-        fs::create_dir_all(artifacts.join("memory_debug")).unwrap();
-        fs::write(artifacts.join("memory_debug").join("reason.txt"), "oom\n").unwrap();
-        #[cfg(unix)]
-        {
-            let outside = root.join("outside-secret.txt");
-            fs::write(&outside, "do-not-bundle\n").unwrap();
-            std::os::unix::fs::symlink(&outside, artifacts.join("linked-secret.txt")).unwrap();
-        }
-        let prompt = "codex prompt body\n";
-        fs::write(artifacts.join("codex.prompt.txt"), prompt).unwrap();
-        fs::write(
-            artifacts.join("codex.prompt.metadata.json"),
-            serde_json::json!({
-                "schema_version": "0.1",
-                "prompt_artifact": artifacts.join("codex.prompt.txt").display().to_string(),
-                "artifact_sha256": format!("sha256:{}", sha256_hex_bytes(prompt.as_bytes())),
-                "bytes": prompt.len(),
-                "chars": prompt.chars().count(),
-                "redaction": "none",
-                "visibility_mode": "full_body_sensitive_artifact"
-            })
-            .to_string(),
-        )
-        .unwrap();
-        let child_dir = artifacts.join("spawn").join("child-1");
-        fs::create_dir_all(&child_dir).unwrap();
-        let child_prompt = "child prompt body\n";
-        let child_handoff = "child handoff body\n";
-        fs::write(child_dir.join("codex.prompt.txt"), child_prompt).unwrap();
-        fs::write(child_dir.join("handoff.md"), child_handoff).unwrap();
-        fs::write(
-            artifacts.join("spawn_handoffs.json"),
-            serde_json::json!({
-                "schema_version": "0.1",
-                "mode": "parallel_read_only_helpers",
-                "children": [{
-                    "agent_run_id": "agent-child-1",
-                    "role": "RepoExplorer",
-                    "handoff": child_dir.join("handoff.md").display().to_string(),
-                    "handoff_sha256": format!("sha256:{}", sha256_hex_bytes(child_handoff.as_bytes())),
-                    "handoff_bytes": child_handoff.len(),
-                    "handoff_chars": child_handoff.chars().count(),
-                    "handoff_redaction": "none",
-                    "handoff_visibility_mode": "reference_only",
-                    "prompt_artifact": child_dir.join("codex.prompt.txt").display().to_string(),
-                    "prompt_metadata": child_dir.join("codex.prompt.metadata.json").display().to_string(),
-                    "prompt_artifact_sha256": format!("sha256:{}", sha256_hex_bytes(child_prompt.as_bytes())),
-                    "prompt_bytes": child_prompt.len(),
-                    "prompt_chars": child_prompt.chars().count(),
-                    "prompt_redaction": "none",
-                    "prompt_visibility_mode": "reference_only",
-                    "stdout_jsonl": child_dir.join("codex.stdout.jsonl").display().to_string(),
-                    "stderr_log": child_dir.join("codex.stderr.log").display().to_string()
-                }]
-            })
-            .to_string(),
-        )
-        .unwrap();
-        let trace_path = root.join("events.jsonl");
-        fs::write(
-            &trace_path,
-            [
-                serde_json::json!({
-                    "run_id": "run-1",
-                    "issue_id": "github:OWNER/REPO#42",
-                    "event_type": "run.status.updated",
-                    "ts": "2026-01-01T00:00:00.000Z",
-                    "ts_unix_ms": 1,
-                    "payload": {"status": "started", "api_key": "sk-secret"}
-                })
-                .to_string(),
-                serde_json::json!({
-                    "run_id": "run-2",
-                    "issue_id": "github:OWNER/REPO#43",
-                    "event_type": "run.status.updated",
-                    "ts": "2026-01-01T00:00:01.000Z",
-                    "ts_unix_ms": 2,
-                    "payload": {"status": "started"}
-                })
-                .to_string(),
-            ]
-            .join("\n"),
-        )
-        .unwrap();
-        let trace_before = fs::read_to_string(&trace_path).unwrap();
-        let mut config = AgentactrConfig::strict_defaults("OWNER/REPO");
-        config.observability.artifact_root = root.join("artifacts").display().to_string();
-        config.observability.debug_bundle_root = debug_root.display().to_string();
-        config.observability.jsonl = trace_path.display().to_string();
-        config.observability.redact_secrets = true;
-
-        let report = create_debug_bundle(&config, "run-1").unwrap();
-
-        let trace_after = fs::read_to_string(&trace_path).unwrap();
-        assert_eq!(trace_before, trace_after);
-        assert_eq!(report.trace_events, 1);
-        let bundle_trace =
-            fs::read_to_string(report.bundle_dir.join("traces").join("events.jsonl")).unwrap();
-        assert!(bundle_trace.contains("\"run_id\":\"run-1\""));
-        assert!(!bundle_trace.contains("run-2"));
-        assert!(!bundle_trace.contains("sk-secret"));
-        assert!(bundle_trace.contains("<redacted>"));
-        let copied_headers = fs::read_to_string(
-            report
-                .bundle_dir
-                .join("artifacts")
-                .join("github_issue.headers"),
-        )
-        .unwrap();
-        assert!(copied_headers.contains("authorization: <redacted>"));
-        assert!(report
-            .bundle_dir
-            .join("artifacts")
-            .join("memory_debug")
-            .join("reason.txt")
-            .exists());
-        #[cfg(unix)]
-        {
-            let copied_link_path = report
-                .bundle_dir
-                .join("artifacts")
-                .join("linked-secret.txt");
-            assert!(!copied_link_path.exists());
-            let skipped = report
-                .bundle_dir
-                .join("artifacts")
-                .join("linked-secret.txt.symlink_skipped.json");
-            let skipped = fs::read_to_string(skipped).unwrap();
-            assert!(skipped.contains("\"action\": \"skipped_symlink\""));
-            assert!(skipped.contains("outside-secret.txt"));
-            assert!(!skipped.contains("do-not-bundle"));
-        }
-        let manifest = fs::read_to_string(report.bundle_dir.join("bundle_manifest.json")).unwrap();
-        assert!(manifest.contains("\"redacted\": true"));
-        assert!(manifest.contains("traces/events.jsonl"));
-        assert!(manifest.contains("\"artifact_integrity\""));
-        assert!(manifest.contains("\"verified\": true"));
-        assert!(manifest.contains("artifacts/workspace.diff.patch"));
-        let integrity =
-            fs::read_to_string(report.bundle_dir.join("artifact_integrity.json")).unwrap();
-        assert!(integrity.contains("\"status\": \"verified\""));
-        assert!(integrity.contains("\"digest_field\": \"handoff_sha256\""));
-        assert!(integrity.contains("\"digest_field\": \"prompt_artifact_sha256\""));
-        assert!(integrity.contains("\"digest_field\": \"patch_sha256\""));
-        assert!(integrity.contains("\"merge_plan\""));
-        assert!(integrity.contains("\"not_recorded\""));
-        assert!(report
-            .bundle_dir
-            .join("artifacts")
-            .join("workspace.diff.patch")
-            .exists());
-        assert!(report
-            .bundle_dir
-            .join("artifacts")
-            .join("workspace.diff.metadata.json")
-            .exists());
-        let vcs_error = fs::read_to_string(report.bundle_dir.join("vcs_status.error.txt")).unwrap();
-        assert!(vcs_error.contains("outside configured vcs.worktree_root"));
-        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -14533,7 +8368,11 @@ fallback_mode = "cli_json"
         config.observability.artifact_root = root.join("artifacts").display().to_string();
         let context = load_run_artifact_context(&config, "run-1").unwrap();
 
-        let integrity = collect_artifact_integrity(&context).unwrap();
+        let integrity = artifacts::collect_artifact_integrity(&ArtifactIntegrityContext {
+            run_id: &context.run_id,
+            artifact_dir: &context.artifact_dir,
+        })
+        .unwrap();
 
         assert_eq!(integrity["status"], "verified");
         assert_eq!(integrity["verified"], true);
@@ -14724,17 +8563,12 @@ fallback_mode = "cli_json"
         ));
         let mut config = AgentactrConfig::strict_defaults("OWNER/REPO");
         config.observability.artifact_root = root.join("artifacts").display().to_string();
-        config.observability.debug_bundle_root = root.join("debug").display().to_string();
 
         assert!(run_artifact_dir(&config, "issue-42-123").is_ok());
         for invalid in ["", "..", "../escape", "nested/run", "nested\\run", "run id"] {
             assert!(
                 run_artifact_dir(&config, invalid).is_err(),
                 "run_artifact_dir accepted invalid RUN_ID {invalid:?}"
-            );
-            assert!(
-                debug_bundle_dir(&config, invalid).is_err(),
-                "debug_bundle_dir accepted invalid RUN_ID {invalid:?}"
             );
         }
         let _ = fs::remove_dir_all(root);
@@ -15351,7 +9185,11 @@ fallback_mode = "cli_json"
             .unwrap()
             .starts_with("sha256:"));
         assert_eq!(metadata["recommendation"], "do_not_merge");
-        let integrity = collect_artifact_integrity(&context).unwrap();
+        let integrity = artifacts::collect_artifact_integrity(&ArtifactIntegrityContext {
+            run_id: &context.run_id,
+            artifact_dir: &context.artifact_dir,
+        })
+        .unwrap();
         assert_eq!(integrity["merge_plan"]["status"], "verified");
         assert_eq!(integrity["merge_plan"]["verified"], true);
         assert_eq!(
@@ -15799,6 +9637,28 @@ fallback_mode = "cli_json"
             find_config_value(&updated, "codex.fallback_mode").as_deref(),
             Some("cli_json")
         );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn config_set_validates_quality_profile_values() {
+        let path = env::temp_dir().join(format!(
+            "agentactr-config-set-quality-profile-test-{}-{}.toml",
+            std::process::id(),
+            new_run_id("config-quality-profile")
+        ));
+        let original = render_agentactr_toml(&AgentactrConfig::strict_defaults("OWNER/REPO"));
+        fs::write(&path, original).unwrap();
+
+        set_config_value(path.to_str().unwrap(), "quality.profile", "standard").unwrap();
+        let updated = fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            find_config_value(&updated, "quality.profile").as_deref(),
+            Some("standard")
+        );
+        let err = set_config_value(path.to_str().unwrap(), "quality.profile", "relaxed")
+            .expect_err("unsupported quality profile must fail closed");
+        assert!(err.contains("unsupported quality.profile value"));
         let _ = fs::remove_file(path);
     }
 }

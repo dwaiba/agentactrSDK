@@ -60,6 +60,44 @@ Prioritize:
 
 - Enterprise production readiness
 
+Rust workspace hardening rules:
+
+- Pin the Rust toolchain and declared MSRV intentionally.
+
+- Prefer workspace-owned dependency versions over per-crate drift.
+
+- Keep clippy, rustdoc, formatting, test, nextest, cargo-deny, and cargo-machete gates synchronized across local hooks, CI, README.md, and specs_agentactrSDK.md.
+
+- Keep cargo-vet, cargo-audit, cargo-deny, and dependency-license/advisory policy synchronized across CI, local validation docs, and release readiness. New dependencies, new default features, yanked replacements, advisory ignores, license exceptions, and unaudited transitive risk must be reviewed intentionally and documented with the narrowest possible justification.
+
+- Security-sensitive Rust surfaces must have an explicit advanced-test posture. Add or maintain fuzz targets for parsers, protocol handlers, artifact readers, redaction, path validation, and ledger/state replay logic when those surfaces change. Run Miri for unsafe or aliasing-sensitive code where feasible. Use sanitizer-backed jobs for FFI, process supervision, filesystem boundary handling, and memory-sensitive code paths where platform support exists.
+
+- Unsafe Rust must be minimal, justified with local safety comments, and guarded by lint policy.
+
+- Public SDK/core contracts must move toward typed errors instead of stringly error surfaces.
+
+- Large CLI or adapter files should be split only along existing domain boundaries and SDK/adapter ownership seams.
+
+Supply-chain and CI hardening rules:
+
+- GitHub Actions and reusable workflows must be pinned to immutable commit SHAs. Version tags may be included only as comments or metadata for readability; execution must not depend on mutable tags, branches, or floating major versions.
+
+- Workflow permissions must be least-privilege by job. Untrusted pull-request and merge-queue workflows must not receive repository secrets, cloud credentials, write tokens, privileged OIDC trust, release credentials, package-publish credentials, or remote-builder secrets.
+
+- Dependabot version updates and security updates must remain enabled for Cargo dependencies and GitHub Actions. Dependency-review gates must block vulnerable, disallowed-license, unexpected-source, or unpinned-action changes unless an explicit reviewed exception is recorded.
+
+- Release artifacts must have SBOM and provenance expectations. Container images, binaries, and package artifacts must publish or retain machine-readable SBOMs and tamper-evident provenance. Release-sensitive workflows should move toward SLSA-aligned build provenance, isolated builders, pinned inputs, and reproducible build metadata.
+
+- Third-party actions, containers, install scripts, and binary downloads must be treated as supply-chain inputs. Prefer official sources, immutable digests or SHAs, checksum verification, signature/provenance verification where available, and narrowly scoped credentials.
+
+Generated AGENTS.md rules:
+
+- `agentactr doctor --fix-agents` and AGENTS template rendering must reflect the selected/configured repository stack, not only filesystem detection.
+
+- Blank or new projects with `repository.declared_primary_stack` set must render that declared stack in generated AGENTS.md.
+
+- Existing AGENTS.md wins: never overwrite it by default; write reviewable artifacts unless the operator explicitly requests replacement.
+
 Remote build services such as depot.dev are trusted and preferred over local machine Docker builds for expensive or release-sensitive image build work when the workflow context is trusted. Keep repository/action variables and secrets out of untrusted pull-request and merge-queue workflows; use remote builders only from trusted workflow contexts or with explicitly non-secret validation paths.
 
 # Citation & Reference Policy

@@ -108,7 +108,7 @@ Default runtime adapter: Codex `exec --json` / feature-gated Codex app-server
 Default tracker: GitHub Issues and Pull Requests  
 Default product implementation: Rust CLI named `agentactr`; daemon mode is specified but not part of the current bootstrap  
 Primary non-functional focus: Linux userspace memory control, traceability, debugging, and replayable state.
-Implementation phase: bootstrap SDK and default Rust CLI. The current repository keeps default Git, GitHub, Linux memory, SQLite, MCP, and quality-gate implementations inside `agentactr-cli` while their public SDK contracts stabilize, but the default Codex runtime adapter is extracted into `agentactr-codex`. Any remaining CLI-local adapters are packaging shortcuts only; the logical SOLID boundaries in this document are still mandatory and must be visible in the types, requests, events, and adapter seams.
+Implementation phase: bootstrap SDK and default Rust CLI. The current repository keeps default Git, GitHub, Linux memory, SQLite, command templates, and quality-gate implementations inside `agentactr-cli` while their public SDK contracts stabilize, but the default Codex runtime adapter is extracted into `agentactr-codex`, the local Git implementation is isolated in the CLI-local `vcs_adapter` module, VCS operator dispatch is isolated in the CLI-local `vcs_commands` module, setup/config/auth/doctor dispatch and AGENTS generation helpers are isolated in the CLI-local `setup_commands` module, issue planning/submission dispatch, issue-set artifacts, Codex issue draft/review artifacts, dedupe, and issue-submission ledger helpers are isolated in the CLI-local `issue_commands` module, quality command dispatch and quality-gate process execution are isolated in the CLI-local `quality_command` module, bootstrap project scaffolding is isolated in the CLI-local `bootstrap_project` command module, command inventory/menu rendering is isolated in the CLI-local `command_catalog` module, CLI documentation rendering is isolated in the CLI-local `docs_command` module, MCP stdio serving is isolated in the CLI-local `mcp_command` module, trace inspection is isolated in the CLI-local `trace_command` module, debug bundle creation is isolated in the CLI-local `debug_bundle` module, and artifact integrity verification is isolated in the CLI-local `artifacts` module for trace/debug consumers. Focused CLI command modules must import explicit dependencies rather than `use crate::*`, so wiring dependencies remain reviewable at each module boundary. Any remaining CLI-local adapters and command modules are packaging shortcuts only; the logical SOLID boundaries in this document are still mandatory and must be visible in the types, requests, events, and adapter seams.
 
 ## 1. Purpose
 
@@ -271,7 +271,18 @@ The bootstrap layout is conforming only if concrete default adapters remain priv
 | --- | --- | --- |
 | `agentactr-codex` Codex process launcher | runtime adapter | extracted; owns `cli_json`, app-server fail-closed stub, and Codex SDK fail-closed stub |
 | `agentactr-cli/src/adapters.rs` GitHub REST reader | tracker adapter | `agentactr-github` |
-| `agentactr-cli/src/adapters.rs` local Git worktree helper | VCS adapter | `agentactr-vcs` |
+| `agentactr-cli/src/vcs_adapter.rs` local Git worktree helper | VCS adapter | `agentactr-vcs` |
+| `agentactr-cli/src/vcs_commands.rs` VCS operator command dispatch | command/HCI module | remains CLI-owned while VCS use cases stabilize |
+| `agentactr-cli/src/setup_commands.rs` setup, config, auth, doctor, AGENTS generation, and domain-artifact command dispatch | command/HCI module | remains CLI-owned while setup and operator diagnostics stabilize |
+| `agentactr-cli/src/issue_commands.rs` issue find/draft/proposals/submit/mark dispatch, issue-set artifacts, Codex issue draft/review artifacts, dedupe, and issue-submission ledger helpers | command/tracker HCI module | `agentactr-issues` if issue proposal and tracker-submission tooling becomes shared across products |
+| `agentactr-cli/src/quality_command.rs` quality plan/run dispatch, safe quality process supervision, Go logical wrappers, domain gate execution, and quality report rendering | command/quality HCI module | `agentactr-quality` if quality execution contracts become shared across products |
+| `agentactr-cli/src/bootstrap_project.rs` blank-project scaffold command | command template/HCI module | `agentactr-templates` if template rendering grows beyond CLI defaults |
+| `agentactr-cli/src/command_catalog.rs` command inventory and menu rendering | command catalog/HCI module | remains CLI-owned unless multiple products need a shared catalog |
+| `agentactr-cli/src/docs_command.rs` CLI reference rendering | command docs/HCI module | remains CLI-owned unless multiple products need shared documentation rendering |
+| `agentactr-cli/src/mcp_command.rs` local stdio MCP server and read-only MCP tool rendering | command/HCI module | remains CLI-owned until MCP bridge contracts need a shared adapter crate |
+| `agentactr-cli/src/trace_command.rs` trace ledger reading and trace command rendering | command/observability module | `agentactr-trace` if replay/debug tooling becomes shared across products |
+| `agentactr-cli/src/debug_bundle.rs` redacted debug bundle assembly and artifact integrity reporting | command/observability module | `agentactr-debug` if bundle schema/redaction become shared SDK contracts |
+| `agentactr-cli/src/artifacts.rs` artifact digest and run-artifact integrity verification | artifact integrity module | `agentactr-artifacts` if artifact schema/integrity contracts become shared SDK contracts |
 | `agentactr-cli/src/linux_memory.rs` cgroup/PSI/process monitor | memory/process adapter | `agentactr-linux-memory` |
 | `agentactr-cli/src/main.rs` SQLite run-state helper | store adapter | `agentactr-store` |
 | `agentactr-sdk/src/discovery.rs` stack and quality-plan helpers | quality planning | `agentactr-quality` or SDK extension module |
@@ -312,7 +323,7 @@ Completion scripts must be generated by the CLI itself, not maintained as handwr
 
 ![Release binary installation and PATH contract](internal_specs_agentactrSDK/svgs/install_path_management.svg)
 
-Release binary installation is an operator convenience surface, not an SDK orchestration use case. `scripts/install-agentactr.sh` installs a downloaded native release binary into a user-writable bin directory, defaults to `$HOME/.local/bin`, accepts `--bin-dir PATH`, verifies the installed binary with `agentactr --version`, and prints shell-specific PATH instructions. It must never edit shell profiles unless `--update-shell-profile` is passed. Completion installation is optional and must call the CLI's generated `agentactr completions bash|zsh|fish|powershell|elvish` surface rather than shipping handwritten completion files. Homebrew packaging is deferred until a dedicated formula/update/test/provenance surface exists.
+Release binary installation is an operator convenience surface, not an SDK orchestration use case. Current public releases intentionally do not attach native CLI binary archives or macOS `.pkg` installers; operators build locally with `cargo build --release --bin agentactr` and may install `target/release/agentactr` into a user-writable bin directory. `scripts/install-agentactr.sh` installs a local or downloaded native binary into a user-writable bin directory, defaults to `$HOME/.local/bin`, accepts `--bin-dir PATH`, verifies the installed binary with `agentactr --version`, and prints shell-specific PATH instructions. It must never edit shell profiles unless `--update-shell-profile` is passed. Completion installation is optional and must call the CLI's generated `agentactr completions bash|zsh|fish|powershell|elvish` surface rather than shipping handwritten completion files. Future Apple Silicon macOS release binaries must be Developer-ID signed, notarized, and Gatekeeper-assessed before upload, and future release automation must publish a signed, notarized, and stapled `.pkg` installer for the Mac distribution path Apple supports outside the Mac App Store [66]. Homebrew packaging is deferred until a dedicated formula/update/test/provenance surface exists.
 
 Nested help is required for all command groups:
 
@@ -341,12 +352,13 @@ agentactr completions bash|zsh|fish|powershell|elvish
 agentactr docs cli-markdown [--output PATH]
 agentactr menu
 agentactr menu --json
-agentactr init --yes --repo OWNER/REPO [--codex-auth auto|chatgpt|api-key]
+agentactr init --yes [--repo OWNER/REPO] [--codex-auth auto|chatgpt|api-key]
 agentactr doctor
 agentactr doctor [--fix-codex-config] [--fix-agents] [--trust-codex-project]
 agentactr config get [KEY]
 agentactr config set KEY VALUE
 agentactr auth codex --method chatgpt|subscription|api-key [--api-key-env CODEX_API_KEY]
+agentactr bootstrap project --stack python|golang|rust|typescript|pulumi|terraform|sql --yes [--force] [--allow-non-empty]
 agentactr mcp serve
 agentactr run issue --repo OWNER/REPO --issue 123 [--human-intervention fail-closed|interactive|review-required] [--codex-approval never|on-request] [--github-finalization automatic_after_quality_gates|require_human_review|disabled] [--dry-run]
 agentactr issue find --repo OWNER/REPO [--query TEXT] [--state open|closed|all] [--label LABEL...] [--assignee USER|none|*] [--author USER] [--since ISO8601] [--sort created|updated|comments] [--direction asc|desc] [--page N] [--per-page N] [--limit N] [--artifact-root PATH] [--include-pull-requests] [--json]
@@ -362,6 +374,7 @@ agentactr vcs list [--json]
 agentactr vcs show RUN_ID [--json]
 agentactr vcs status RUN_ID
 agentactr vcs diff RUN_ID [--output PATH]
+agentactr vcs apply RUN_ID --check|--yes [--3way] [--allow-dirty]
 agentactr merge plan RUN_ID [--json]
 agentactr trace list
 agentactr trace show RUN_ID
@@ -392,7 +405,7 @@ Current bootstrap note: the CLI now has a typed `clap` command tree for top-leve
 
 The CLI must make Codex and GitHub feel like one workflow without hiding the adapter boundary:
 
-- `agentactr init --yes --repo OWNER/REPO` creates a working Codex/GitHub repo configuration without prompting. Plain `agentactr init` may ask at most one confirmation only when running in an interactive terminal.
+- `agentactr init --yes [--repo OWNER/REPO]` creates local agentactr/Codex/workflow configuration without prompting. When `--repo` is omitted, the default CLI writes the explicit placeholder `OWNER/REPO`; issue discovery, drafting, submission, and `run issue` still require a concrete tracker repository before tracker-backed work can start. Plain `agentactr init` may ask at most one confirmation only when running in an interactive terminal.
 - `agentactr doctor` validates Codex, GitHub auth, cgroup v2, PSI, SQLite, OTLP, workspace permissions, and API version compatibility in one report.
 - `agentactr run issue ...` must launch Codex through `codex exec --json` and stream concise phase updates, not raw JSONL.
 - `agentactr trace show RUN_ID` must explain the agent tree, tool calls, GitHub mutations, memory pressure, and failure points without requiring users to inspect raw logs.
@@ -458,6 +471,15 @@ Declaring these dependencies is not enough. The default CLI and adapters must us
 
 The CLI parser is not core orchestration. It constructs dependencies, validates config, and calls SDK use cases.
 
+Rust workspace governance is part of the default CLI contract:
+
+- the repository must pin the Rust toolchain with `rust-toolchain.toml`;
+- `[workspace.package]` must declare the supported `rust-version` MSRV floor;
+- repeated third-party and internal crate dependencies must be centralized under `[workspace.dependencies]`;
+- every workspace package must opt into `[workspace.lints]`;
+- unsafe Rust must be minimal, locally documented with `SAFETY:` invariants, and guarded by `clippy::undocumented_unsafe_blocks`;
+- public core/SDK port traits must use typed errors such as `PortError`/`PortResult`, not new raw `Result<_, String>` surfaces.
+
 ### 7.6 Container Images and Docker Runtime Backend
 
 `agentactr` publishes two distinct image families. They are not interchangeable:
@@ -480,7 +502,7 @@ Runtime images must be built with reproducible release inputs:
 - vulnerability scanning before publish;
 - no OpenAI, GitHub, or repository secrets baked into layers.
 
-Trusted GitHub Actions image builds must keep untrusted pull-request and merge-queue workflows secret-free. Remote build services such as Depot are trusted and preferred over local machine Docker builds for expensive or release-sensitive image work when the workflow context is trusted. Full runtime/static image builds use Depot-backed trusted workflows with the Depot project ID supplied from a repository/action variable and the Depot token supplied from an action secret. PR and merge-queue workflows remain limited to validation and local Dockerfile checks without Depot secrets. Push-to-main Dockerfile checks are trusted and may use Depot `call: check` without publishing images. The checked-in workflow surface currently keeps `nightly` and `security` cron schedules commented out; `nightly` remains manually runnable through `workflow_dispatch` [64], [65].
+Trusted GitHub Actions image builds must keep untrusted pull-request and merge-queue workflows secret-free. Remote build services such as Depot are trusted and preferred over local machine Docker builds for expensive or release-sensitive image work when the workflow context is trusted. Full runtime/static image builds use Depot-backed trusted workflows with the Depot project ID supplied from a repository/action variable and the Depot token supplied from an action secret. PR and merge-queue workflows remain limited to validation and local Dockerfile checks without Depot secrets. Push-to-main Dockerfile checks are trusted and may use Depot `call: check` without publishing images. All external action references in checked-in workflows must execute by full 40-character commit SHA only, with readable version tags limited to comments, because GitHub documents full-length SHA pins as the immutable action reference form [67]. The checked-in release workflow intentionally disables native binary archive and macOS `.pkg` asset publication; release notes instruct operators to build locally from source. The checked-in workflow surface currently keeps `nightly` and `security` cron schedules commented out; `nightly` remains manually runnable through `workflow_dispatch` [64], [65].
 
 Docker container network policy is separate from Codex command sandbox policy. The runtime container must have enough egress for Codex to reach the configured OpenAI endpoint unless a managed proxy or allowlist replaces direct egress. Repository command network access remains governed by Codex sandbox/project settings such as `sandbox_workspace_write.network_access = false` and `codex.network = "off"`.
 
@@ -915,7 +937,7 @@ The current bootstrap implementation may keep synchronous traits in `agentactr-c
 - synchronous traits are treated as bootstrap contracts, not stable SDK contracts
 - every bootstrap trait still exposes provider-neutral request/result types
 - marker structs are allowed only when the corresponding command is explicitly milestone-scoped
-- default adapter structs may live in narrow adapter crates such as `agentactr-codex`, or temporarily in `agentactr-cli::adapters` while not yet extracted; core and SDK users must not import concrete defaults
+- default adapter structs and command-template modules may live in narrow adapter crates such as `agentactr-codex`, or temporarily in focused CLI-private modules such as `agentactr-cli::adapters`, `agentactr-cli::vcs_adapter`, `agentactr-cli::vcs_commands`, `agentactr-cli::setup_commands`, `agentactr-cli::issue_commands`, `agentactr-cli::quality_command`, `agentactr-cli::bootstrap_project`, `agentactr-cli::command_catalog`, `agentactr-cli::docs_command`, `agentactr-cli::mcp_command`, `agentactr-cli::trace_command`, and `agentactr-cli::debug_bundle` while not yet extracted; core and SDK users must not import concrete defaults
 - adapter capability and version reporting must be present even in bootstrap implementations
 - provider-specific strings, raw JSON payloads, command-line flags, HTTP clients, cgroup paths, process IDs, and SQLite handles must not become stable SDK surface
 
@@ -927,12 +949,14 @@ Current bootstrap ports are permitted to include the following temporary conveni
 - blocking `IssueDraftPlanner` for read-only issue proposal drafting, provided planner output is schema-validated and treated as issue-set artifacts rather than implementation-agent work
 - CLI-private memory setup that passes a concrete cgroup path to the default runtime adapter, provided this path is removed from SDK-stable runtime requests
 
+Bootstrap port methods must return `PortResult<T>` backed by a typed `PortError { code, message }`. Adapter implementations may continue to normalize legacy helper errors from strings during the bootstrap phase, but new public core/SDK port methods must not expose raw `Result<_, String>`.
+
 Present implementation snapshot:
 
 - `agentactr-core` currently exposes blocking traits and keeps marker request/result structs only for commands that remain explicitly milestone-scoped.
 - `AgentIssueRunRequest` currently carries `context_manifest: PathBuf`, an optional provider-neutral `MemoryLease`, and child `AgentMemoryLease` entries for the default CLI runtime bridge; concrete cgroup paths are resolved inside memory/process supervisor adapters.
 - `agentactr-codex` owns the concrete Codex runtime adapter. `agentactr-cli` wires it as the default runtime and supplies a thin Linux-memory supervisor bridge for cgroup attachment.
-- `agentactr-cli` still owns the concrete GitHub/Git/Linux-memory adapters and wires them directly.
+- `agentactr-cli` still owns the concrete GitHub, local Git, Linux-memory adapters, default command templates, and operator command catalog and wires them directly; local Git behavior is isolated in `agentactr-cli::vcs_adapter`, VCS operator dispatch is isolated in `agentactr-cli::vcs_commands`, setup/config/auth/doctor dispatch is isolated in `agentactr-cli::setup_commands`, issue planning and submission dispatch is isolated in `agentactr-cli::issue_commands`, quality command execution is isolated in `agentactr-cli::quality_command`, blank-project scaffolding is isolated in `agentactr-cli::bootstrap_project`, command inventory/menu rendering is isolated in `agentactr-cli::command_catalog`, CLI reference rendering is isolated in `agentactr-cli::docs_command`, MCP stdio serving is isolated in `agentactr-cli::mcp_command`, trace inspection is isolated in `agentactr-cli::trace_command`, debug bundle assembly is isolated in `agentactr-cli::debug_bundle`, and artifact integrity verification is isolated in `agentactr-cli::artifacts` to keep HCI, observability, catalog/docs logic, artifact verification, GitHub, runtime, quality, setup, issue, and VCS adapter code separated.
 - `agentactr-sdk` currently re-exports core types and provides repository discovery plus config/Codex/MCP rendering helpers.
 
 This snapshot is implementation-shaped, not SDK-stable. Any public API stabilization must replace raw filesystem cgroup paths and provider command details with typed SDK references, leases, and events.
@@ -1159,7 +1183,7 @@ Protobuf checks must enforce: never reuse field numbers, reserve deleted numbers
 
 Configuration keys for domain behavior must remain synchronized across generated `agentactr.toml`, `config get/set`, shell completions, `docs/cli/reference.md`, `commands --json`, `doctor`, tests, and this specification. Required keys include `quality.domains`, `quality.domain_gate_opt_ins`, `architecture.domains`, `architecture.domain_graph_artifact`, `architecture.fail_on_domain_drift`, `templates.enabled_domains`, `templates.framework_profile`, and `templates.agents_policy`. `architecture.domains` controls domain profile/graph composition; `quality.domains` controls domain quality-gate composition. `auto` enables detection, `detected_only` limits matching to detected evidence, `declared_only` limits matching to explicit declarations, exact domain ids declare or filter domains, category selectors such as `language`, `iac`, `database`, `streaming`, `storage`, `communications`, `observability`, `security`, `resilience`, `tenancy`, and `service_patterns` expand to their canonical provider-neutral domain ids, and `disabled`/`none` suppresses that surface fail-closed. Quality execution must preserve the configured domain policy when inspecting run worktrees; it must not silently rebuild an unconfigured auto domain plan.
 
-`agentactr init` and `agentactr doctor --fix-agents` may generate `AGENTS.md` when absent. Existing `AGENTS.md` must not be overwritten by default; the CLI may write a review artifact instead unless an explicit replacement flag is introduced. `templates.agents_policy=generate_when_absent` may write `AGENTS.md` only when absent, `artifact_only` writes only a generated review artifact, and `disabled` performs no AGENTS.md write. Generated AGENTS content must include SOLID/Clean Architecture rules, the spec source-of-truth rule, adapter boundaries, quality gates, domain policies, secure defaults, repo commands, detected evidence, and ambiguity warnings.
+`agentactr init` and `agentactr doctor --fix-agents` may generate `AGENTS.md` when absent. Existing `AGENTS.md` must not be overwritten by default; the CLI may write a review artifact instead unless an explicit replacement flag is introduced. `templates.agents_policy=generate_when_absent` may write `AGENTS.md` only when absent, `artifact_only` writes only a generated review artifact, and `disabled` performs no AGENTS.md write. Generated AGENTS content must include SOLID/Clean Architecture rules, the spec source-of-truth rule, adapter boundaries, quality gates, domain policies, secure defaults, repo commands, detected evidence, and ambiguity warnings. When `repository.declared_primary_stack` is set to a concrete stack, SDK repository inspection and AGENTS rendering must present that selected stack even for blank/new repositories without filesystem evidence. Platform-specific guidance must be relevant to detected or explicitly declared domains; otherwise generated AGENTS.md should keep only generic provider-neutral boundary and secrets-management rules and avoid PostgreSQL, ClickHouse, Valkey, Kafka, storage, communications, protobuf, gRPC, or observability instructions that do not apply to the project. Secrets-management guidance is universal: generated AGENTS.md must require secrets to stay out of source, prompts, generated artifacts, logs, and issue bodies, and to flow through configured secret stores or environment variables with redaction enabled.
 
 Linear remains a later tracker-adapter milestone. This domain-profile slice may keep tracker testkit readiness and provider-neutral tracker contracts, but it must not claim production Linear support unless a concrete adapter passes the tracker contract suite. SDK code must never depend on GitHub REST, GitHub MCP, Linear GraphQL, or provider JSON shapes.
 
@@ -2081,9 +2105,11 @@ Bootstrap `agentactr trace show RUN_ID` filters the local JSONL event ledger for
 
 `agentactr vcs diff RUN_ID [--output PATH]` writes a run-scoped workspace diff patch artifact plus JSON metadata with run id, artifact paths, base/current commit, touched files, untracked-file names, patch size, and SHA-256 digest. It must use `VersionControl::diff`, must validate the recorded worktree with the same fail-closed rules as `vcs show` and `vcs status`, and must emit a `vcs.diff.recorded` trace event. The patch artifact must be a valid `git apply` input: tracked-file hunks must preserve patch terminators/newlines, and untracked file bodies must be embedded as new-file diffs when `includes_untracked_file_bodies = true`. Local VCS commit and merge remain disabled until their contracts are implemented; `agentactr finalize` is implemented separately through SDK lifecycle/finalization use cases and typed tracker ports.
 
+`agentactr vcs apply RUN_ID --check|--yes [--3way] [--allow-dirty]` is a bootstrap-local operator helper for the manual merge path. It validates the recorded worktree scope, records a fresh run-scoped workspace diff artifact, and then runs `git apply` from the current source checkout. `--check` is read-only and must fail closed on conflicts. `--yes` mutates the current source checkout and must fail closed when the source checkout is dirty unless `--allow-dirty` is explicit. `--3way` requests Git's three-way application mode so operators get conflict-aware diagnostics when a patch cannot apply cleanly. The helper does not commit, push, open a pull request, merge, or mutate tracker finalization state.
+
 `agentactr quality run RUN_ID` re-runs the detected pre-commit plan in the isolated worktree and writes a new `PreCommitReport` artifact without mutating finalization state unless explicitly passed to `agentactr finalize`.
 
-Run-scoped commands that execute commands or inspect VCS state from `context_manifest.json`, including `quality run`, `vcs show`, `vcs status`, `vcs diff`, and `merge plan`, must fail closed when the manifest run id does not match `RUN_ID`, when `worktree.run_id` is present and mismatched, or when the recorded worktree path is outside `vcs.worktree_root` after lexical normalization and canonical symlink resolution. `vcs list` must not run Git against invalid recorded worktree paths; it may report the local entry as invalid with the validation error so operators can clean stale artifacts safely.
+Run-scoped commands that execute commands or inspect VCS state from `context_manifest.json`, including `quality run`, `vcs show`, `vcs status`, `vcs diff`, `vcs apply`, and `merge plan`, must fail closed when the manifest run id does not match `RUN_ID`, when `worktree.run_id` is present and mismatched, or when the recorded worktree path is outside `vcs.worktree_root` after lexical normalization and canonical symlink resolution. `vcs list` must not run Git against invalid recorded worktree paths; it may report the local entry as invalid with the validation error so operators can clean stale artifacts safely.
 
 `agentactr merge plan RUN_ID [--json]` writes run-scoped `merge_plan.json` and `merge_plan.metadata.json` artifacts and emits `vcs.merge_plan.recorded`. The metadata artifact must include a stable SHA-256 digest, byte count, and character count for `merge_plan.json` so debug/replay tooling can verify merge-plan identity without depending on terminal output. The bootstrap plan is read-only: it records base/current commit, current `vcs.base_ref` commit, base-ref drift, whether the worktree HEAD contains the current base ref, workspace diff artifact presence, configured `merge.mode`, touched files, blockers, warnings, and recommendation. With the default `merge.mode = "disabled"`, the recommendation must block merging even when the worktree is otherwise clean. Cross-issue overlap remains a warning/place-holder until the overlap detector lands.
 
@@ -2095,6 +2121,8 @@ VCS command groups must be explicit about side effects:
 | `vcs show RUN_ID` | read-only local artifact/worktree detail | implemented |
 | `vcs status RUN_ID` | read-only Git status plus trace event | implemented |
 | `vcs diff RUN_ID` | read-only diff artifact generation | implemented |
+| `vcs apply RUN_ID --check` | read-only source-checkout patch validation | implemented |
+| `vcs apply RUN_ID --yes` | source-checkout patch application; no commit/push/merge | implemented |
 | `vcs commit RUN_ID` | local Git commit mutation | milestone until `VersionControl::commit` is implemented |
 | `merge plan RUN_ID` | read-only merge-risk artifact generation | implemented |
 | `vcs cleanup RUN_ID` | local worktree removal | milestone until retention and approval policy are implemented |
@@ -2302,6 +2330,8 @@ Existing repo-defined hooks are authoritative unless they require network, secre
 
 ### 16.4 Clean Repository and Bootstrap Policy
 
+![Blank project bootstrap and tracker-backed issue boundary](internal_specs_agentactrSDK/svgs/blank_project_bootstrap_boundary.svg)
+
 The SDK must distinguish an empty repository from an undetected or unsupported repository.
 
 Empty repository detection:
@@ -2334,6 +2364,18 @@ agentactr config set repository.allowed_bootstrap explicit_only
 agentactr config set quality.profile strict
 ```
 
+`agentactr bootstrap project --stack python|golang|rust|typescript|pulumi|terraform|sql --yes [--force] [--allow-non-empty]` is the explicit blank-project scaffold command. It is write-capable, must require `--yes`, and must refuse non-empty directories by default. Agentactr bootstrap metadata created by `agentactr init`, such as `.git`, `.agentactr`, `.codex`, `agentactr.toml`, `WORKFLOW.md`, and `.gitignore`, does not make a directory non-blank for this check. Operators must pass `--allow-non-empty` to intentionally scaffold into a reviewed non-empty directory. The command must also refuse to overwrite existing target files unless `--force` is passed; `.gitignore` is the narrow exception and may be merged by appending missing scaffold ignore rules while preserving existing entries. It prints every written file and the stack-specific start commands. The bootstrap surface is local and provider-neutral: it must not call an LLM, mutate GitHub, create a worktree, install dependencies, run networked commands, or infer cloud/provider choices. The scaffolds must include conventional source/test folders, toolchain config, quality commands, and `.pre-commit-config.yaml` for:
+
+- Python: Hatch build backend, `uv`, Ruff, Pytest, Pyright, `poetry.toml`, `src/`, and `tests/`.
+- Go: `go.mod`, `cmd/`, `internal/`, tests, `golangci-lint`, and pre-commit hooks.
+- Rust: workspace layout, pinned `rust-toolchain.toml`, declared workspace MSRV, `deny.toml`, tests, and pre-commit hooks modeled after this repository.
+- TypeScript: Bun, Biome, strict TypeScript, tests, and pre-commit hooks.
+- Pulumi: modular TypeScript Pulumi project, local lint/typecheck/test gates, and pre-commit hooks. Live `pulumi preview` is documented as optional because it can require credentials, backend access, and network; it must not be in default pre-commit hooks or printed start commands.
+- Terraform: modular layout, tracked `.terraform.lock.hcl` provider lock policy, `terraform fmt`, `validate`, `test`, and pre-commit hooks.
+- SQL: forward migrations, reviewed rollbacks, backfills, seeds, smoke tests, SQLFluff, and pre-commit hooks.
+
+Local blank-project scaffold/init and tracker-backed issue automation are separate operator workflows. `agentactr init --yes` may render a placeholder tracker repo for local metadata, but `agentactr issue find`, `agentactr issue draft`, `agentactr issue submit`, and `agentactr run issue` require a concrete tracker repository in the current default CLI because issue discovery and drafting fetch tracker inventory for dedupe before any GitHub mutation.
+
 The default Rust Codex/GitHub CLI must print exact recovery steps when empty repo detection fails:
 
 ```text
@@ -2344,15 +2386,18 @@ Declare a stack and rerun:
   agentactr doctor
 
 Supported starter stacks:
-  typescript
-  rust
-  golang
   python
+  golang
+  rust
+  typescript
+  pulumi
+  terraform
+  sql
 ```
 
 ### 16.5 Technology Detection and Prerequisite Setup
 
-Technology detection is deterministic and confidence-scored. The SDK must record `detected_stack`, `confidence`, `evidence_files`, and `selected_quality_profile`. Repository discovery must inspect directory entries without following symlinks; symlinked directories and files are not valid stack evidence and must be skipped before recursion or evidence collection. This keeps local discovery scoped to the checkout and prevents cycles or out-of-tree files from influencing preflight decisions.
+Technology detection is deterministic and confidence-scored. The SDK must record `detected_stack`, `confidence`, `evidence_files`, and `selected_quality_profile`. `selected_quality_profile` is resolved from `quality.profile` with `strict` as the secure default; supported bootstrap profiles are `strict`, `standard`, and `minimal`. Strict profile enforces pinned-tool and strict-prerequisite findings. Standard and minimal profiles intentionally relax strict prerequisite findings and compose smaller quality plans, but they must still preserve deterministic stack detection, fail-closed unknown-stack behavior, and explicit setup guidance. Repository discovery must inspect directory entries without following symlinks; symlinked directories and files are not valid stack evidence and must be skipped before recursion or evidence collection. This keeps local discovery scoped to the checkout and prevents cycles or out-of-tree files from influencing preflight decisions.
 
 Primary stack selection:
 
@@ -2364,6 +2409,7 @@ Primary stack selection:
 Prerequisite setup rules:
 
 - Existing repository files and lockfiles are authoritative.
+- Terraform scaffolds must keep `.terraform.lock.hcl` tracked once providers are selected; generated ignore rules must not exclude the provider lock file because readonly lockfile validation depends on it for reproducible fresh checkouts.
 - The SDK may install or use tools only through repo-local, version-pinned, or lockfile-governed mechanisms.
 - The SDK must not install global tools silently.
 - If a required pinned tool is missing, the run fails quality gates and prints exact setup guidance.
@@ -2375,7 +2421,7 @@ Minimal bootstrap by declared stack:
 | Stack | Minimal prerequisite files the SDK may ask the agent to create when bootstrap is explicit |
 | --- | --- |
 | `typescript` | `package.json` with pinned `packageManager`, `.nvmrc` or `.node-version`, `tsconfig.json`, lockfile after frozen install, `biome.json` when Biome is selected, test/build scripts appropriate to the declared framework, and Zod dependency/config only when new boundary validation is introduced |
-| `rust` | `Cargo.toml`, `rust-toolchain.toml` when policy pins Rust, `.cargo/config.toml` only when needed, `deny.toml` for `cargo deny`, nextest config only when needed, fuzz target scaffolding only for fuzz-required code, and public-library metadata when semver checks are required |
+| `rust` | `Cargo.toml` with `rust-version`, pinned `rust-toolchain.toml` when policy pins Rust, `.cargo/config.toml` only when needed, `deny.toml` for `cargo deny`, nextest config only when needed, fuzz target scaffolding only for fuzz-required code, and public-library metadata when semver checks are required |
 | `golang` | `go.mod`, `go.sum` when external dependencies exist, Go version/toolchain declaration, pinned `golangci-lint` mechanism, `.golangci.yml` with depguard/import-boundary rules when architecture checks are required, and `tools.go`/tool config when the repo uses that convention |
 | `python` | `pyproject.toml`, `uv.lock`, `.python-version`, Ruff config, Pyright config when type checking is required, pytest config, and dependency/security tool declarations such as `pip-audit`, `deptry`, and optional `bandit`/`import-linter` config when required |
 
@@ -2917,7 +2963,7 @@ Status labels:
 ### Milestone 4: Pre-Commit and VCS Policy
 
 - `implemented`: technology detection for TypeScript, Rust, Golang, and Python
-- `implemented`: empty repository detection and explicit stack bootstrap policy
+- `implemented`: empty repository detection, explicit stack bootstrap policy, and `agentactr bootstrap project --stack ... --yes` scaffolds for Python, Go, Rust, TypeScript, Pulumi, Terraform, and SQL
 - `pending`: existing repo pre-commit hook discovery
 - `partial`: pinned toolchain and dependency integrity checks
 - `partial`: stack-specific strict gates for TypeScript, Rust, Golang, and Python
@@ -2926,6 +2972,7 @@ Status labels:
 - `implemented`: local `agentactr vcs list [--json]` and `agentactr vcs show RUN_ID [--json]` provide read-only local worktree inventory/detail from run manifests with worktree scope validation
 - `implemented`: local `agentactr vcs status RUN_ID` reads run context/worktree metadata, reports base/current commit and touched files, and emits a trace event
 - `implemented`: local `agentactr vcs diff RUN_ID [--output PATH]` writes a read-only workspace diff patch and metadata artifact through `VersionControl::diff`
+- `implemented`: local `agentactr vcs apply RUN_ID --check|--yes [--3way] [--allow-dirty]` validates or applies the recorded patch into the source checkout for manual merge workflows
 - `implemented`: local `agentactr merge plan RUN_ID [--json]` writes a read-only merge-risk artifact through `VersionControl::merge_plan`; default merge remains disabled
 - `partial`: typed `clap` top-level and nested generated help, generated shell completions, generated CLI Markdown reference, bootstrap-static `agentactr commands` / `agentactr commands --json` inventory, and read-only `agentactr menu` / `agentactr menu --json` navigator are implemented; per-command exhaustive help details, full documentation site generation, and interactive menu action execution remain pending
 - `pending`: local commit after gates
@@ -3098,3 +3145,7 @@ Status labels:
 [64] Depot, "Container builds in GitHub Actions," Depot Documentation. [Online]. Available: https://depot.dev/docs/container-builds/integrations/github-actions. [Accessed: May 16, 2026].
 
 [65] Docker, "Validating build configuration with GitHub Actions," Docker Docs. [Online]. Available: https://docs.docker.com/build/ci/github-actions/checks/. [Accessed: May 16, 2026].
+
+[66] Apple, "Notarizing macOS software before distribution," Apple Developer Documentation. [Online]. Available: https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution. [Accessed: May 16, 2026].
+
+[67] GitHub, "Secure use reference," GitHub Docs. [Online]. Available: https://docs.github.com/en/actions/reference/security/secure-use. [Accessed: May 17, 2026].

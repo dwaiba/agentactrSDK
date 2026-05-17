@@ -1,4 +1,4 @@
-use agentactr_core::{AgentactrConfig, CodexAuthMode};
+use agentactr_core::{AgentactrConfig, CodexAuthMode, DomainProfile, DomainQualityGate};
 
 use crate::discovery::RepoInspection;
 use crate::domains::domain_matches_selection;
@@ -882,6 +882,7 @@ pub fn render_agents_md(config: &AgentactrConfig, inspection: &RepoInspection) -
             .collect::<Vec<_>>()
             .join("\n")
     };
+    let platform_rules = render_provider_platform_rules(&rendered_domains, &rendered_gates);
     format!(
         r#"# AGENTS.md instructions for this repository
 
@@ -923,13 +924,7 @@ Domain quality gates and architecture checks:
 
 Provider and platform rules:
 
-- Keep PostgreSQL and ClickHouse migrations/backfills explicit, reviewed, and separated by OLTP versus analytical schema-evolution concerns.
-- Treat Valkey Pub/Sub as transient and Valkey Streams as the durable/replayable Valkey pattern.
-- Treat Kafka as the durable high-throughput streaming pattern; use outbox/inbox for cross-boundary consistency.
-- Keep object storage provider-neutral; S3, Google Cloud Storage, and Azure Blob details belong in adapters/templates/config.
-- Keep email/communications provider-neutral; Resend is a template example, not a domain dependency.
-- Keep protobuf/gRPC generated DTOs and clients out of domain entities; map them at adapters/boundaries.
-- Require trace, metric, log, propagation, redaction, and tenant/run correlation for service-facing changes.
+{platform_rules}
 
 Before introducing architectural decisions, refactors, dependency changes, or protocol changes:
 
@@ -943,7 +938,75 @@ Before introducing architectural decisions, refactors, dependency changes, or pr
         tracker_kind = config.tracker.kind,
         domains = domains,
         gates = gates,
+        platform_rules = platform_rules,
     )
+}
+
+fn render_provider_platform_rules(
+    domains: &[&DomainProfile],
+    gates: &[&DomainQualityGate],
+) -> String {
+    let active_domains = domains
+        .iter()
+        .map(|profile| profile.id.as_str())
+        .chain(gates.iter().map(|gate| gate.domain.as_str()))
+        .collect::<Vec<_>>();
+    let mut rules = vec![
+        "- Keep concrete providers, tools, clouds, and trackers behind ports, adapters, configuration, or template profiles.".to_string(),
+        "- Do not introduce platform-specific dependencies unless the domain is detected or explicitly declared.".to_string(),
+        "- Keep secrets out of source, prompts, generated artifacts, logs, and issue bodies; use configured secret stores or environment variables with redaction enabled.".to_string(),
+    ];
+
+    let postgres_active = domain_is_active(&active_domains, &["database.postgres_migrations"]);
+    let clickhouse_active = domain_is_active(&active_domains, &["database.clickhouse_migrations"]);
+    if postgres_active && clickhouse_active {
+        rules.push("- Keep PostgreSQL and ClickHouse migrations/backfills explicit, reviewed, and separated by OLTP versus analytical schema-evolution concerns.".to_string());
+    } else {
+        if postgres_active {
+            rules.push("- Keep PostgreSQL migrations, schema changes, backfills, destructive changes, rollback notes, and expand/contract sequencing explicit and reviewed.".to_string());
+        }
+        if clickhouse_active {
+            rules.push("- Keep ClickHouse analytical schema evolution, materialized-view dependencies, ingestion compatibility, and backfill strategy explicit and reviewed.".to_string());
+        }
+    }
+
+    if domain_is_active(&active_domains, &["streaming.valkey"]) {
+        rules.push("- Treat Valkey Pub/Sub as transient and Valkey Streams as the durable/replayable Valkey pattern.".to_string());
+    }
+    if domain_is_active(&active_domains, &["streaming.kafka"]) {
+        rules.push("- Treat Kafka as the durable high-throughput streaming pattern; use outbox/inbox for cross-boundary consistency.".to_string());
+    }
+    if domain_is_active(&active_domains, &["storage.object"]) {
+        rules.push("- Keep object storage provider-neutral; S3, Google Cloud Storage, and Azure Blob details belong in adapters/templates/config.".to_string());
+    }
+    if domain_is_active(&active_domains, &["communications.email"]) {
+        rules.push("- Keep email/communications provider-neutral; Resend is a template example, not a domain dependency.".to_string());
+    }
+    if domain_is_active(&active_domains, &["api_contracts.protobuf", "rpc.grpc"]) {
+        rules.push("- Keep protobuf/gRPC generated DTOs and clients out of domain entities; map them at adapters/boundaries.".to_string());
+    }
+    if domain_is_active(
+        &active_domains,
+        &[
+            "observability.otel_prometheus",
+            "tenancy.multi_tenant",
+            "security.auth_authz",
+            "resilience.service_patterns",
+        ],
+    ) {
+        rules.push("- Require trace, metric, log, propagation, redaction, and tenant/run correlation for service-facing changes.".to_string());
+    }
+    if domain_is_active(&active_domains, &["security.auth_authz"]) {
+        rules.push("- Treat secrets management as part of the security boundary: rotate credentials, scope tokens narrowly, and never couple provider secret APIs directly to domain code.".to_string());
+    }
+
+    rules.join("\n")
+}
+
+fn domain_is_active(active_domains: &[&str], candidates: &[&str]) -> bool {
+    active_domains
+        .iter()
+        .any(|active| candidates.iter().any(|candidate| active == candidate))
 }
 
 fn filter_template_domains<'a>(
@@ -1173,6 +1236,36 @@ mod tests {
         assert!(rendered.contains("rpc.grpc"));
         assert!(rendered.contains("Transport isolation"));
         assert!(rendered.contains("protobuf/gRPC generated DTOs"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn agents_md_uses_declared_stack_for_blank_project_without_irrelevant_platform_rules() {
+        let root = std::env::temp_dir().join(format!(
+            "agentactr-agents-blank-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut config = AgentactrConfig::strict_defaults("OWNER/REPO");
+        config.repository.declared_primary_stack = "python".to_string();
+        let inspection = crate::discovery::discover_repository_with_config(&root, &config);
+
+        let rendered = render_agents_md(&config, &inspection);
+
+        assert!(rendered.contains("- primary_stack: python"));
+        assert!(rendered.contains("language.python"));
+        assert!(
+            rendered.contains("Keep concrete providers, tools, clouds, and trackers behind ports")
+        );
+        assert!(rendered.contains("Keep secrets out of source"));
+        assert!(!rendered.contains("Treat Kafka"));
+        assert!(!rendered.contains("Treat Valkey"));
+        assert!(!rendered.contains("PostgreSQL and ClickHouse"));
+        assert!(!rendered.contains("protobuf/gRPC generated DTOs"));
         let _ = std::fs::remove_dir_all(root);
     }
 }

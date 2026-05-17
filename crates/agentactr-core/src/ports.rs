@@ -4,6 +4,53 @@ use crate::{
 };
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PortError {
+    pub code: String,
+    pub message: String,
+}
+
+impl PortError {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn unsupported(message: impl Into<String>) -> Self {
+        Self::new("unsupported", message)
+    }
+}
+
+impl std::fmt::Display for PortError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for PortError {}
+
+impl From<String> for PortError {
+    fn from(message: String) -> Self {
+        Self::new("adapter_error", message)
+    }
+}
+
+impl From<&str> for PortError {
+    fn from(message: &str) -> Self {
+        Self::new("adapter_error", message)
+    }
+}
+
+impl From<PortError> for String {
+    fn from(error: PortError) -> Self {
+        error.to_string()
+    }
+}
+
+pub type PortResult<T> = Result<T, PortError>;
+
 pub trait IssueTracker: Send + Sync {
     fn version_report(&self) -> AdapterVersionReport {
         AdapterVersionReport::unknown("issue_tracker")
@@ -11,16 +58,20 @@ pub trait IssueTracker: Send + Sync {
     fn capabilities(&self) -> AdapterCapabilities {
         AdapterCapabilities::unknown("issue_tracker")
     }
-    fn fetch_candidates(&self, _q: CandidateQuery) -> Result<Vec<Issue>, String>;
-    fn fetch_by_ids(&self, _ids: &[IssueId]) -> Result<Vec<Issue>, String>;
-    fn claim(&self, _req: ClaimRequest) -> Result<ClaimResult, String>;
-    fn release(&self, _req: ReleaseRequest) -> Result<ReleaseResult, String>;
-    fn comment(&self, _req: CommentRequest) -> Result<CommentRef, String>;
-    fn create_issue(&self, _req: IssueCreateRequest) -> Result<IssueCreateResult, String> {
-        Err("issue creation is not implemented by this issue tracker adapter".to_string())
+    fn fetch_candidates(&self, _q: CandidateQuery) -> PortResult<Vec<Issue>>;
+    fn fetch_by_ids(&self, _ids: &[IssueId]) -> PortResult<Vec<Issue>>;
+    fn claim(&self, _req: ClaimRequest) -> PortResult<ClaimResult>;
+    fn release(&self, _req: ReleaseRequest) -> PortResult<ReleaseResult>;
+    fn comment(&self, _req: CommentRequest) -> PortResult<CommentRef>;
+    fn create_issue(&self, _req: IssueCreateRequest) -> PortResult<IssueCreateResult> {
+        Err(PortError::unsupported(
+            "issue creation is not implemented by this issue tracker adapter",
+        ))
     }
-    fn link_issue(&self, _req: IssueLinkRequest) -> Result<IssueLinkResult, String> {
-        Err("issue linking is not implemented by this issue tracker adapter".to_string())
+    fn link_issue(&self, _req: IssueLinkRequest) -> PortResult<IssueLinkResult> {
+        Err(PortError::unsupported(
+            "issue linking is not implemented by this issue tracker adapter",
+        ))
     }
 }
 
@@ -31,8 +82,10 @@ pub trait IssueDraftPlanner: Send + Sync {
     fn capabilities(&self) -> AdapterCapabilities {
         AdapterCapabilities::unknown("issue_draft_planner")
     }
-    fn draft(&self, _req: IssueDraftRequest) -> Result<IssueDraftResult, String> {
-        Err("issue drafting is not implemented by this planner adapter".to_string())
+    fn draft(&self, _req: IssueDraftRequest) -> PortResult<IssueDraftResult> {
+        Err(PortError::unsupported(
+            "issue drafting is not implemented by this planner adapter",
+        ))
     }
 }
 
@@ -41,12 +94,14 @@ pub trait AgentRuntime: Send + Sync {
         AdapterVersionReport::unknown("agent_runtime")
     }
     fn capabilities(&self) -> AgentRuntimeCapabilities;
-    fn start(&self, _req: AgentStartRequest) -> Result<AgentSession, String>;
-    fn run_turn(&self, _req: AgentTurnRequest) -> Result<AgentTurnStream, String>;
-    fn run_issue(&self, _req: AgentIssueRunRequest) -> Result<AgentRunReport, String> {
-        Err("run_issue is not implemented by this runtime adapter".to_string())
+    fn start(&self, _req: AgentStartRequest) -> PortResult<AgentSession>;
+    fn run_turn(&self, _req: AgentTurnRequest) -> PortResult<AgentTurnStream>;
+    fn run_issue(&self, _req: AgentIssueRunRequest) -> PortResult<AgentRunReport> {
+        Err(PortError::unsupported(
+            "run_issue is not implemented by this runtime adapter",
+        ))
     }
-    fn cancel(&self, _session_id: &str, _reason: CancelReason) -> Result<(), String>;
+    fn cancel(&self, _session_id: &str, _reason: CancelReason) -> PortResult<()>;
 }
 
 pub trait MemoryController: Send + Sync {
@@ -56,28 +111,32 @@ pub trait MemoryController: Send + Sync {
     fn capabilities(&self) -> AdapterCapabilities {
         AdapterCapabilities::unknown("memory_controller")
     }
-    fn create_run_group(&self, _req: MemoryGroupRequest) -> Result<MemoryGroup, String>;
-    fn attach_pid(&self, _group: &MemoryGroup, _pid: u32) -> Result<(), String>;
-    fn sample(&self, _group: &MemoryGroup) -> Result<MemorySample, String>;
-    fn reclaim(&self, _group: &MemoryGroup, _bytes: u64) -> Result<MemoryActionResult, String> {
-        Err("memory reclaim is not implemented by this memory controller".to_string())
+    fn create_run_group(&self, _req: MemoryGroupRequest) -> PortResult<MemoryGroup>;
+    fn attach_pid(&self, _group: &MemoryGroup, _pid: u32) -> PortResult<()>;
+    fn sample(&self, _group: &MemoryGroup) -> PortResult<MemorySample>;
+    fn reclaim(&self, _group: &MemoryGroup, _bytes: u64) -> PortResult<MemoryActionResult> {
+        Err(PortError::unsupported(
+            "memory reclaim is not implemented by this memory controller",
+        ))
     }
     fn kill_group(
         &self,
         _group: &MemoryGroup,
         _terminal_cleanup: bool,
-    ) -> Result<MemoryActionResult, String> {
-        Err("cgroup kill is not implemented by this memory controller".to_string())
+    ) -> PortResult<MemoryActionResult> {
+        Err(PortError::unsupported(
+            "cgroup kill is not implemented by this memory controller",
+        ))
     }
-    fn finalize_group(&self, _group: &MemoryGroup) -> Result<MemoryActionResult, String> {
-        Err("memory group finalization is not implemented by this memory controller".to_string())
+    fn finalize_group(&self, _group: &MemoryGroup) -> PortResult<MemoryActionResult> {
+        Err(PortError::unsupported(
+            "memory group finalization is not implemented by this memory controller",
+        ))
     }
-    fn enforce(
-        &self,
-        _group: &MemoryGroup,
-        _policy: MemoryPolicy,
-    ) -> Result<MemoryDecision, String> {
-        Err("MemoryController::enforce is deprecated; policy belongs to RunResourceGovernor and adapters expose primitive actions".to_string())
+    fn enforce(&self, _group: &MemoryGroup, _policy: MemoryPolicy) -> PortResult<MemoryDecision> {
+        Err(PortError::unsupported(
+            "MemoryController::enforce is deprecated; policy belongs to RunResourceGovernor and adapters expose primitive actions",
+        ))
     }
 }
 
@@ -88,32 +147,34 @@ pub trait RuntimeProcessSupervisor: Send + Sync {
     fn capabilities(&self) -> AdapterCapabilities {
         AdapterCapabilities::unknown("runtime_process_supervisor")
     }
-    fn observe(&self, _event: &RuntimeProcessEvent) -> Result<(), String> {
+    fn observe(&self, _event: &RuntimeProcessEvent) -> PortResult<()> {
         Ok(())
     }
     fn start(
         &self,
         _event: &RuntimeProcessEvent,
         _artifact_dir: &Path,
-    ) -> Result<Option<Box<dyn RuntimeProcessMonitor>>, String>;
+    ) -> PortResult<Option<Box<dyn RuntimeProcessMonitor>>>;
     fn preserve_debug_bundle(
         &self,
         _event: Option<&RuntimeProcessEvent>,
         _artifact_dir: &Path,
         _reason: &str,
-    ) -> Result<(), String>;
+    ) -> PortResult<()>;
     fn cancel_process_tree(
         &self,
         _event: &RuntimeProcessEvent,
         _reason: &str,
-    ) -> Result<String, String> {
-        Err("runtime process supervisor does not support process-tree cancellation".to_string())
+    ) -> PortResult<String> {
+        Err(PortError::unsupported(
+            "runtime process supervisor does not support process-tree cancellation",
+        ))
     }
 }
 
 pub trait RuntimeProcessMonitor: Send {
     fn failure(&self) -> Option<String>;
-    fn stop(self: Box<Self>) -> Result<(), String>;
+    fn stop(self: Box<Self>) -> PortResult<()>;
 }
 
 pub trait TraceSink: Send + Sync {
@@ -123,7 +184,7 @@ pub trait TraceSink: Send + Sync {
     fn capabilities(&self) -> AdapterCapabilities {
         AdapterCapabilities::unknown("trace_sink")
     }
-    fn emit(&self, _event: TraceEvent) -> Result<(), String>;
+    fn emit(&self, _event: TraceEvent) -> PortResult<()>;
 }
 
 pub trait HumanIntervention: Send + Sync {
@@ -134,7 +195,7 @@ pub trait HumanIntervention: Send + Sync {
         AdapterCapabilities::unknown("human_intervention")
     }
     fn mode(&self) -> HumanInterventionMode;
-    fn resolve(&self, _req: InterventionRequest) -> Result<InterventionDecision, String>;
+    fn resolve(&self, _req: InterventionRequest) -> PortResult<InterventionDecision>;
 }
 
 pub trait VersionControl: Send + Sync {
@@ -144,11 +205,11 @@ pub trait VersionControl: Send + Sync {
     fn capabilities(&self) -> AdapterCapabilities {
         AdapterCapabilities::unknown("version_control")
     }
-    fn detect(&self, _root: &Path) -> Result<VcsCapabilities, String>;
-    fn prepare_workspace(&self, _req: WorktreeRequest) -> Result<WorktreeRef, String>;
-    fn diff(&self, _worktree: &WorktreeRef) -> Result<WorkspaceDiff, String>;
-    fn commit(&self, _req: CommitRequest) -> Result<CommitRef, String>;
-    fn merge_plan(&self, _req: MergePlanRequest) -> Result<MergePlan, String>;
+    fn detect(&self, _root: &Path) -> PortResult<VcsCapabilities>;
+    fn prepare_workspace(&self, _req: WorktreeRequest) -> PortResult<WorktreeRef>;
+    fn diff(&self, _worktree: &WorktreeRef) -> PortResult<WorkspaceDiff>;
+    fn commit(&self, _req: CommitRequest) -> PortResult<CommitRef>;
+    fn merge_plan(&self, _req: MergePlanRequest) -> PortResult<MergePlan>;
 }
 
 pub trait PreCommitRunner: Send + Sync {
@@ -158,9 +219,9 @@ pub trait PreCommitRunner: Send + Sync {
     fn capabilities(&self) -> AdapterCapabilities {
         AdapterCapabilities::unknown("pre_commit_runner")
     }
-    fn detect_stack(&self, _worktree: &WorktreeRef) -> Result<TechnologyStack, String>;
-    fn plan(&self, _req: PreCommitPlanRequest) -> Result<PreCommitPlan, String>;
-    fn run(&self, _plan: PreCommitPlan) -> Result<PreCommitReport, String>;
+    fn detect_stack(&self, _worktree: &WorktreeRef) -> PortResult<TechnologyStack>;
+    fn plan(&self, _req: PreCommitPlanRequest) -> PortResult<PreCommitPlan>;
+    fn run(&self, _plan: PreCommitPlan) -> PortResult<PreCommitReport>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

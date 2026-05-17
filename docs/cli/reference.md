@@ -27,6 +27,7 @@ Commands:
   doctor       Inspect local config, credentials, adapters, runtime, and platform readiness.
   config       Read or write local agentactr configuration.
   auth         Configure authentication for supported runtimes.
+  bootstrap    Scaffold blank projects with explicit tooling.
   mcp          Run the local MCP bridge.
   run          Run issue automation.
   issue        Inspect and submit agent-proposed tracker issues.
@@ -90,7 +91,7 @@ Usage: help [COMMAND]...
 
 Arguments:
   [COMMAND]...
-          
+
 
 Options:
   -h, --help
@@ -101,7 +102,7 @@ Options:
 
 | Catalog command | Status | Side effects | SDK owner | Required credentials | Platform constraints | Purpose |
 | --- | --- | --- | --- | --- | --- | --- |
-| `agentactr init --yes --repo OWNER/REPO [--codex-auth auto\|chatgpt\|api-key]` | `implemented` | `writes_config_files` | `config_rendering` | `none` | `none` | Create local agentactr, Codex, workflow, AGENTS.md when absent, and ignore configuration. |
+| `agentactr init --yes [--repo OWNER/REPO] [--codex-auth auto\|chatgpt\|api-key]` | `implemented` | `writes_config_files` | `config_rendering` | `none` | `none` | Create local agentactr, Codex, workflow, AGENTS.md when absent, and ignore configuration. |
 
 #### Generated Help
 
@@ -121,7 +122,7 @@ Options:
 
       --codex-auth <auto|chatgpt|api-key>
           Codex auth mode to render.
-          
+
           [possible values: auto, chatgpt, api-key]
 
   -h, --help
@@ -201,7 +202,7 @@ Arguments:
           [possible values: tracker.kind, tracker.repo, tracker.token_env, tracker.github_api_version, tracker.active_labels, tracker.ignore_labels, tracker.claim_label, tracker.running_label, tracker.failed_label, tracker.done_label, codex.command, codex.mode, codex.profile, codex.approval_policy, codex.sandbox_mode, codex.network, codex.default_model, codex.model_reasoning_effort, codex.openai_api_key_env, codex.app_server_transport, codex.app_server_experimental_api, codex.sdk_bridge, codex.fallback_mode, codex.auth_mode, human_intervention.mode, human_intervention.on_codex_approval_request, human_intervention.on_ambiguous_diff, human_intervention.on_review_disagreement, human_intervention.on_missing_codex_auth, human_intervention.on_missing_github_token, human_intervention.run_start_banner, human_intervention.print_override_steps, github.finalization, github.standard_label_policy, github.project_automation, github.project_owner, github.project_number, github.project_title, github.project_priority_field, github.project_size_field, mcp.default_policy, mcp.remote_research_servers, mcp.remote_github_read_tools, mcp.remote_github_write_tools, mcp.openai_developer_docs, mcp.google_developer_api, mcp.huggingface, mcp.github_remote, mcp.fail_on_required_mcp_missing, repository.empty_repo_policy, repository.declared_primary_stack, repository.allowed_bootstrap, repository.bootstrap_prereqs, repository.fail_on_low_confidence_stack_detection, vcs.kind, vcs.workspace_strategy, vcs.base_ref, vcs.worktree_root, vcs.branch_template, vcs.record_base_commit, vcs.fail_on_dirty_source_checkout, vcs.copy_runtime_config_to_worktree, vcs.detect_cross_issue_file_overlap, vcs.overlap_policy, quality.profile, quality.pre_commit_mode, quality.technology_detection, quality.domains, quality.domain_gate_opt_ins, quality.run_existing_pre_commit_config, quality.fail_on_missing_toolchain, quality.fail_on_untracked_generated_files, quality.allow_test_omission_reason, quality.artifact_dir, quality.dependency_checks, quality.architecture_checks, quality.tool_pinning, architecture.domains, architecture.domain_graph_artifact, architecture.fail_on_domain_drift, templates.enabled_domains, templates.framework_profile, templates.agents_policy, commit.mode, commit.signoff, commit.gpg_sign, commit.message_template, commit.required_trailers, merge.mode, merge.push, merge.strategy, merge.require_clean_rebase, merge.require_no_cross_issue_overlap, merge.require_human_review_for_merge, workspace.root, workspace.keep_successful, workspace.keep_failed, scheduling.poll_interval_ms, scheduling.max_concurrent_issue_runs, scheduling.lease_ttl_ms, scheduling.max_retries, spawn.enabled, spawn.max_child_agents_per_issue, spawn.max_spawn_depth, spawn.allow_parallel_read_only, spawn.allow_parallel_writers, spawn.strategy, spawn.max_total_uncached_input_tokens, spawn.max_child_uncached_input_tokens, spawn.max_child_output_tokens, spawn.artifact_handoff, spawn.pause_on_memory_pressure, execution.backend, execution.strict_memory_required, execution.docker.command, execution.docker.image, execution.docker.pull_policy, execution.docker.network, execution.docker.workspace_mount, execution.docker.artifact_mount, execution.docker.remove_containers, execution.docker.container_prefix, linux_memory.enabled, linux_memory.cgroup_root, linux_memory.root_group, linux_memory.mode, linux_memory.cgroup_v2_required, linux_memory.psi_required, linux_memory.per_issue_memory_high, linux_memory.per_issue_memory_max, linux_memory.per_agent_memory_high, linux_memory.per_agent_memory_max, linux_memory.psi_memory_some_threshold_us, linux_memory.psi_memory_window_us, linux_memory.oom_score_adj, linux_memory.setrlimit_address_space, linux_memory.setrlimit_file_size, linux_memory.kill_policy, linux_memory.oom_policy, observability.jsonl, observability.sqlite, observability.artifact_root, observability.otel_enabled, observability.otel_endpoint, observability.debug_bundle_root, observability.redact_secrets]
 
   <VALUE>
-          
+
 
 Options:
   -h, --help
@@ -228,7 +229,39 @@ Options:
           [possible values: chatgpt, subscription, api-key]
 
       --api-key-env <CODEX_API_KEY>
-          
+
+
+  -h, --help
+          Print help
+```
+
+### `agentactr bootstrap project`
+
+| Catalog command | Status | Side effects | SDK owner | Required credentials | Platform constraints | Purpose |
+| --- | --- | --- | --- | --- | --- | --- |
+| `agentactr bootstrap project --stack python\|golang\|rust\|typescript\|pulumi\|terraform\|sql --yes [--force] [--allow-non-empty]` | `implemented` | `writes_scaffold_files_refuses_non_empty_or_overwrite_without_explicit_flags` | `bootstrap_project_templates` | `none` | `none` | Scaffold a blank project with stack-specific tools, pre-commit hooks, tests, and helper start commands. |
+
+#### Generated Help
+
+```text
+Command: agentactr bootstrap project
+
+Scaffold a blank project with stack-specific tools and starter commands.
+
+Usage: project [OPTIONS] --stack <python|golang|rust|typescript|pulumi|terraform|sql>
+
+Options:
+      --stack <python|golang|rust|typescript|pulumi|terraform|sql>
+          [possible values: python, golang, go, rust, typescript, pulumi, terraform, sql]
+
+      --yes
+          Permit writing scaffold files.
+
+      --force
+          Overwrite existing scaffold target files.
+
+      --allow-non-empty
+          Permit scaffolding into a non-empty directory after target-file conflict checks.
 
   -h, --help
           Print help
@@ -271,10 +304,10 @@ Usage: issue [OPTIONS] --repo <OWNER/REPO> --issue <123>
 
 Options:
       --repo <OWNER/REPO>
-          
+
 
       --issue <123>
-          
+
 
       --human-intervention <fail-closed|interactive|review-required>
           [possible values: fail-closed, interactive, review-required]
@@ -286,7 +319,7 @@ Options:
           [possible values: automatic_after_quality_gates, require_human_review, disabled]
 
       --dry-run
-          
+
 
   -h, --help
           Print help
@@ -309,25 +342,25 @@ Usage: find [OPTIONS] --repo <OWNER/REPO>
 
 Options:
       --repo <OWNER/REPO>
-          
+
 
       --state <open|closed|all>
           [default: open]
 
       --query <TEXT>
-          
+
 
       --label <LABEL>
-          
+
 
       --assignee <USER|none|*>
-          
+
 
       --author <USER>
-          
+
 
       --since <ISO8601>
-          
+
 
       --sort <created|updated|comments>
           [default: updated]
@@ -336,7 +369,7 @@ Options:
           [default: desc]
 
       --page <N>
-          
+
 
       --per-page <N>
           [default: 50]
@@ -345,13 +378,13 @@ Options:
           [default: 50]
 
       --artifact-root <PATH>
-          
+
 
       --json
-          
+
 
       --include-pull-requests
-          
+
 
   -h, --help
           Print help
@@ -374,37 +407,37 @@ Usage: draft [OPTIONS] --repo <OWNER/REPO>
 
 Options:
       --repo <OWNER/REPO>
-          
+
 
       --prompt <TEXT>
-          
+
 
       --prompt-file <PATH>
-          
+
 
       --stack <rust|typescript|golang|python>
-          
+
 
       --framework <nextjs|none>
-          
+
 
       --parent <ISSUE_NUMBER>
-          
+
 
       --artifact-root <PATH>
-          
+
 
       --limit <N>
           [default: 50]
 
       --codex-draft
-          
+
 
       --codex-review
-          
+
 
       --json
-          
+
 
   -h, --help
           Print help
@@ -427,7 +460,7 @@ Usage: proposals <ISSUE_SET_ID>
 
 Arguments:
   <ISSUE_SET_ID>
-          
+
 
 Options:
   -h, --help
@@ -451,26 +484,26 @@ Usage: submit [OPTIONS] --proposal <PROPOSAL_ID> <ISSUE_SET_ID>
 
 Arguments:
   <ISSUE_SET_ID>
-          
+
 
 Options:
       --proposal <PROPOSAL_ID>
-          
+
 
       --resume
-          
+
 
       --yes
-          
+
 
       --allow-possible-duplicate
-          
+
 
       --reason <TEXT>
-          
+
 
       --require-codex-review
-          
+
 
   -h, --help
           Print help
@@ -493,17 +526,17 @@ Usage: mark --proposal <PROPOSAL_ID> --dedupe <unique|duplicate_blocked> --reaso
 
 Arguments:
   <ISSUE_SET_ID>
-          
+
 
 Options:
       --proposal <PROPOSAL_ID>
-          
+
 
       --dedupe <unique|duplicate_blocked>
-          
+
 
       --reason <TEXT>
-          
+
 
   -h, --help
           Print help
@@ -566,7 +599,7 @@ Usage: run <RUN_ID>
 
 Arguments:
   <RUN_ID>
-          
+
 
 Options:
   -h, --help
@@ -590,10 +623,10 @@ Usage: prepare [OPTIONS] --issue <123>
 
 Options:
       --issue <123>
-          
+
 
       --repo <OWNER/REPO>
-          
+
 
   -h, --help
           Print help
@@ -616,7 +649,7 @@ Usage: status <RUN_ID>
 
 Arguments:
   <RUN_ID>
-          
+
 
 Options:
   -h, --help
@@ -663,11 +696,11 @@ Usage: show [OPTIONS] <RUN_ID>
 
 Arguments:
   <RUN_ID>
-          
+
 
 Options:
       --json
-          
+
 
   -h, --help
           Print help
@@ -690,11 +723,49 @@ Usage: diff [OPTIONS] <RUN_ID>
 
 Arguments:
   <RUN_ID>
-          
+
 
 Options:
       --output <PATH>
-          
+
+
+  -h, --help
+          Print help
+```
+
+### `agentactr vcs apply`
+
+| Catalog command | Status | Side effects | SDK owner | Required credentials | Platform constraints | Purpose |
+| --- | --- | --- | --- | --- | --- | --- |
+| `agentactr vcs apply RUN_ID --check\|--yes [--3way] [--allow-dirty]` | `implemented` | `read_only_check_or_writes_source_checkout_when_yes` | `bootstrap_vcs_patch_apply` | `none` | `git,recorded_worktree` | Validate or apply a recorded run patch into the current source checkout with conflict-aware diagnostics. |
+
+#### Generated Help
+
+```text
+Command: agentactr vcs apply
+
+Validate or apply a recorded run patch into the source checkout.
+
+Usage: apply [OPTIONS] <RUN_ID>
+
+Arguments:
+  <RUN_ID>
+
+
+Options:
+      --check
+          Validate that the patch applies cleanly.
+
+      --yes
+          Apply the patch to the current source checkout.
+
+      --3way
+          Use git apply --3way for conflict-aware application.
+
+          [aliases: --three-way]
+
+      --allow-dirty
+          Permit applying into a dirty source checkout.
 
   -h, --help
           Print help
@@ -717,11 +788,11 @@ Usage: plan [OPTIONS] <RUN_ID>
 
 Arguments:
   <RUN_ID>
-          
+
 
 Options:
       --json
-          
+
 
   -h, --help
           Print help
@@ -764,7 +835,7 @@ Usage: show <RUN_ID>
 
 Arguments:
   <RUN_ID>
-          
+
 
 Options:
   -h, --help
@@ -788,7 +859,7 @@ Usage: bundle <RUN_ID>
 
 Arguments:
   <RUN_ID>
-          
+
 
 Options:
   -h, --help
@@ -872,7 +943,7 @@ Usage: daemon --config <agentactr.toml>
 
 Options:
       --config <agentactr.toml>
-          
+
 
   -h, --help
           Print help
@@ -895,10 +966,10 @@ Usage: query --repo <OWNER/REPO> --label <LABEL> --human-intervention <fail-clos
 
 Options:
       --repo <OWNER/REPO>
-          
+
 
       --label <LABEL>
-          
+
 
       --human-intervention <fail-closed|interactive|review-required>
           [possible values: fail-closed, interactive, review-required]
@@ -924,7 +995,7 @@ Usage: replay <RUN_ID>
 
 Arguments:
   <RUN_ID>
-          
+
 
 Options:
   -h, --help
@@ -972,7 +1043,7 @@ Usage: cli-markdown [OPTIONS]
 
 Options:
       --output <PATH>
-          
+
 
   -h, --help
           Print help
@@ -1018,7 +1089,7 @@ Usage: commit <RUN_ID>
 
 Arguments:
   <RUN_ID>
-          
+
 
 Options:
   -h, --help
@@ -1042,7 +1113,7 @@ Usage: cleanup <RUN_ID>
 
 Arguments:
   <RUN_ID>
-          
+
 
 Options:
   -h, --help
@@ -1067,20 +1138,20 @@ Usage: finalize [OPTIONS] <RUN_ID>
 
 Arguments:
   <RUN_ID>
-          
+
 
 Options:
       --approve
-          
+
 
       --reject
-          
+
 
       --reason <REASON>
-          
+
 
       --resume
-          
+
 
   -h, --help
           Print help
@@ -1103,7 +1174,7 @@ Usage: eval [ARGS]...
 
 Arguments:
   [ARGS]...
-          
+
 
 Options:
   -h, --help

@@ -29,8 +29,17 @@ fi
 
 for workflow in .github/workflows/*.yml; do
   test -f "${workflow}"
-  if rg -n 'uses: [^@[:space:]]+($|[[:space:]]+#)' "${workflow}"; then
-    printf 'Every external action reference must include an explicit ref: %s\n' "${workflow}" >&2
+  if rg -n '^[[:space:]]*-?[[:space:]]*uses: [^@[:space:]#]+($|[[:space:]]+#)' "${workflow}"; then
+    printf 'Every external action reference must include an immutable commit SHA: %s\n' "${workflow}" >&2
+    exit 1
+  fi
+  unpinned_actions="$(
+    rg -n '^[[:space:]]*-?[[:space:]]*uses: [^@[:space:]#]+@[^[:space:]#]+' "${workflow}" |
+      rg -v '@[0-9A-Fa-f]{40}([[:space:]]+#.*)?$' || true
+  )"
+  if [ -n "${unpinned_actions}" ]; then
+    printf '%s\n' "${unpinned_actions}" >&2
+    printf 'Every external action reference must be pinned to a 40-character commit SHA; put tag names in comments only: %s\n' "${workflow}" >&2
     exit 1
   fi
   job_count="$(awk '
@@ -78,12 +87,15 @@ rg -n '^  push:$' .github/workflows/docker-main.yml >/dev/null
 rg -n '^      - main$' .github/workflows/docker-main.yml >/dev/null
 rg -n 'call: check' .github/workflows/docker-main.yml >/dev/null
 
-rg -n 'x86_64-unknown-linux-gnu' .github/workflows/release.yml >/dev/null
-rg -n 'aarch64-unknown-linux-gnu' .github/workflows/release.yml >/dev/null
-rg -n 'aarch64-apple-darwin' .github/workflows/release.yml >/dev/null
-rg -n 'ubuntu-24.04-arm' .github/workflows/release.yml >/dev/null
-rg -n '"self-hosted","macOS","ARM64","agentactr-release-macos-arm64"' .github/workflows/release.yml >/dev/null
-rg -n 'actions/download-artifact@v7' .github/workflows/release.yml >/dev/null
+rg -n 'build-binaries:' .github/workflows/release.yml >/dev/null
+rg -n 'if: \$\{\{ false \}\}' .github/workflows/release.yml >/dev/null
+rg -n 'Native CLI binaries are not attached' .github/workflows/release.yml >/dev/null
+rg -n 'Native binary archives are intentionally omitted' .github/workflows/release.yml >/dev/null
+rg -n '\.agentactr/image-metadata/\*\.json' .github/workflows/release.yml >/dev/null
+if rg -n 'actions/download-artifact@v7' .github/workflows/release.yml >/dev/null; then
+  echo "release workflow must not ship native binary archives while binary distribution is disabled" >&2
+  exit 1
+fi
 rg -n 'release_notes:' .github/workflows/release.yml >/dev/null
 test -f docs/releases/0.1.0.md
 test -x scripts/trigger-release.sh

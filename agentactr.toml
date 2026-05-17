@@ -1,6 +1,6 @@
 [tracker]
 kind = "github" # possible values: github
-repo = "dwaiba/agentactrSDK"
+repo = "OWNER/REPO"
 token_env = "GITHUB_TOKEN"
 github_api_version = "2026-03-10"
 active_labels = ["agentactr:ready"]

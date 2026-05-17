@@ -5,9 +5,9 @@ use agentactr_sdk::{
     AdapterVersionReport, AgentIssueRunRequest, AgentNode, AgentRunReport, AgentRuntime,
     AgentRuntimeCapabilities, AgentSession, AgentStartRequest, AgentTurnRequest, AgentTurnStream,
     CancelReason, CodexConfig, CodexMode, ExecutionConfig, Issue, LinuxMemoryConfig, MemoryGroupId,
-    ProcessGroupId, ProcessId, RunId, RuntimeKind, RuntimeProcessAttribution, RuntimeProcessEvent,
-    RuntimeProcessEventKind, RuntimeProcessModel, RuntimeProcessMonitor, RuntimeProcessSupervisor,
-    RuntimeTransportKind, SpawnPlan, WriteScope,
+    PortResult, ProcessGroupId, ProcessId, RunId, RuntimeKind, RuntimeProcessAttribution,
+    RuntimeProcessEvent, RuntimeProcessEventKind, RuntimeProcessModel, RuntimeProcessMonitor,
+    RuntimeProcessSupervisor, RuntimeTransportKind, SpawnPlan, WriteScope,
 };
 use sha2::{Digest, Sha256};
 use std::env;
@@ -34,7 +34,7 @@ impl RuntimeProcessSupervisor for NoopCodexMemorySupervisor {
         &self,
         event: &RuntimeProcessEvent,
         _artifact_dir: &Path,
-    ) -> Result<Option<Box<dyn RuntimeProcessMonitor>>, String> {
+    ) -> PortResult<Option<Box<dyn RuntimeProcessMonitor>>> {
         Err(format!(
             "memory group {} was configured, but no RuntimeProcessSupervisor was injected",
             event
@@ -43,7 +43,8 @@ impl RuntimeProcessSupervisor for NoopCodexMemorySupervisor {
                 .as_ref()
                 .map(MemoryGroupId::as_str)
                 .unwrap_or("<unknown>")
-        ))
+        )
+        .into())
     }
 
     fn preserve_debug_bundle(
@@ -51,7 +52,7 @@ impl RuntimeProcessSupervisor for NoopCodexMemorySupervisor {
         _event: Option<&RuntimeProcessEvent>,
         _artifact_dir: &Path,
         _reason: &str,
-    ) -> Result<(), String> {
+    ) -> PortResult<()> {
         Ok(())
     }
 }
@@ -143,7 +144,7 @@ impl AgentRuntime for CodexRuntimeAdapter {
         }
     }
 
-    fn start(&self, req: AgentStartRequest) -> Result<AgentSession, String> {
+    fn start(&self, req: AgentStartRequest) -> PortResult<AgentSession> {
         match &self.transport {
             CodexRuntimeTransport::CliJson(adapter) => adapter.start(req),
             CodexRuntimeTransport::AppServer(adapter) => adapter.start(req),
@@ -151,7 +152,7 @@ impl AgentRuntime for CodexRuntimeAdapter {
         }
     }
 
-    fn run_turn(&self, req: AgentTurnRequest) -> Result<AgentTurnStream, String> {
+    fn run_turn(&self, req: AgentTurnRequest) -> PortResult<AgentTurnStream> {
         match &self.transport {
             CodexRuntimeTransport::CliJson(adapter) => adapter.run_turn(req),
             CodexRuntimeTransport::AppServer(adapter) => adapter.run_turn(req),
@@ -159,7 +160,7 @@ impl AgentRuntime for CodexRuntimeAdapter {
         }
     }
 
-    fn run_issue(&self, req: AgentIssueRunRequest) -> Result<AgentRunReport, String> {
+    fn run_issue(&self, req: AgentIssueRunRequest) -> PortResult<AgentRunReport> {
         match &self.transport {
             CodexRuntimeTransport::CliJson(adapter) => adapter.run_issue(req),
             CodexRuntimeTransport::AppServer(adapter) => adapter.run_issue(req),
@@ -167,7 +168,7 @@ impl AgentRuntime for CodexRuntimeAdapter {
         }
     }
 
-    fn cancel(&self, session_id: &str, reason: CancelReason) -> Result<(), String> {
+    fn cancel(&self, session_id: &str, reason: CancelReason) -> PortResult<()> {
         match &self.transport {
             CodexRuntimeTransport::CliJson(adapter) => adapter.cancel(session_id, reason),
             CodexRuntimeTransport::AppServer(adapter) => adapter.cancel(session_id, reason),
@@ -282,23 +283,24 @@ impl AgentRuntime for CodexAppServerAdapter {
         }
     }
 
-    fn start(&self, _req: AgentStartRequest) -> Result<AgentSession, String> {
-        Err(Self::unsupported_message())
+    fn start(&self, _req: AgentStartRequest) -> PortResult<AgentSession> {
+        Err(Self::unsupported_message().into())
     }
 
-    fn run_turn(&self, _req: AgentTurnRequest) -> Result<AgentTurnStream, String> {
-        Err(Self::unsupported_message())
+    fn run_turn(&self, _req: AgentTurnRequest) -> PortResult<AgentTurnStream> {
+        Err(Self::unsupported_message().into())
     }
 
-    fn run_issue(&self, _req: AgentIssueRunRequest) -> Result<AgentRunReport, String> {
-        Err(Self::unsupported_message())
+    fn run_issue(&self, _req: AgentIssueRunRequest) -> PortResult<AgentRunReport> {
+        Err(Self::unsupported_message().into())
     }
 
-    fn cancel(&self, session_id: &str, _reason: CancelReason) -> Result<(), String> {
+    fn cancel(&self, session_id: &str, _reason: CancelReason) -> PortResult<()> {
         Err(format!(
             "{}; cancel requested for session {session_id}",
             Self::unsupported_message()
-        ))
+        )
+        .into())
     }
 }
 
@@ -406,23 +408,24 @@ impl AgentRuntime for CodexSdkAdapter {
         }
     }
 
-    fn start(&self, _req: AgentStartRequest) -> Result<AgentSession, String> {
-        Err(Self::unsupported_message())
+    fn start(&self, _req: AgentStartRequest) -> PortResult<AgentSession> {
+        Err(Self::unsupported_message().into())
     }
 
-    fn run_turn(&self, _req: AgentTurnRequest) -> Result<AgentTurnStream, String> {
-        Err(Self::unsupported_message())
+    fn run_turn(&self, _req: AgentTurnRequest) -> PortResult<AgentTurnStream> {
+        Err(Self::unsupported_message().into())
     }
 
-    fn run_issue(&self, _req: AgentIssueRunRequest) -> Result<AgentRunReport, String> {
-        Err(Self::unsupported_message())
+    fn run_issue(&self, _req: AgentIssueRunRequest) -> PortResult<AgentRunReport> {
+        Err(Self::unsupported_message().into())
     }
 
-    fn cancel(&self, session_id: &str, _reason: CancelReason) -> Result<(), String> {
+    fn cancel(&self, session_id: &str, _reason: CancelReason) -> PortResult<()> {
         Err(format!(
             "{}; cancel requested for session {session_id}",
             Self::unsupported_message()
-        ))
+        )
+        .into())
     }
 }
 
@@ -656,6 +659,7 @@ Spawn context:
                     monitor
                 }
                 Err(err) => {
+                    let err = err.to_string();
                     let _ = self.memory_supervisor.preserve_debug_bundle(
                         Some(&started_event),
                         &req.artifact_dir,
@@ -698,6 +702,7 @@ Spawn context:
         };
         if let Some(monitor) = memory_monitor {
             if let Err(err) = monitor.stop() {
+                let err = err.to_string();
                 if req.memory.is_some() {
                     let _ = self.memory_supervisor.preserve_debug_bundle(
                         Some(&started_event),
@@ -844,15 +849,15 @@ impl AgentRuntime for CodexCliAdapter {
         }
     }
 
-    fn start(&self, _req: AgentStartRequest) -> Result<AgentSession, String> {
-        Err("start is represented by run_issue in this bootstrap adapter".to_string())
+    fn start(&self, _req: AgentStartRequest) -> PortResult<AgentSession> {
+        Err("start is represented by run_issue in this bootstrap adapter".into())
     }
 
-    fn run_turn(&self, _req: AgentTurnRequest) -> Result<AgentTurnStream, String> {
-        Err("run_turn is not implemented in this milestone".to_string())
+    fn run_turn(&self, _req: AgentTurnRequest) -> PortResult<AgentTurnStream> {
+        Err("run_turn is not implemented in this milestone".into())
     }
 
-    fn run_issue(&self, req: AgentIssueRunRequest) -> Result<AgentRunReport, String> {
+    fn run_issue(&self, req: AgentIssueRunRequest) -> PortResult<AgentRunReport> {
         self.run_issue_request(&req)?;
         Ok(AgentRunReport {
             stdout_jsonl: req.artifact_dir.join("codex.stdout.jsonl"),
@@ -860,10 +865,11 @@ impl AgentRuntime for CodexCliAdapter {
         })
     }
 
-    fn cancel(&self, session_id: &str, _reason: CancelReason) -> Result<(), String> {
+    fn cancel(&self, session_id: &str, _reason: CancelReason) -> PortResult<()> {
         Err(format!(
             "cancel is not implemented for session {session_id} in the single-shot codex exec bootstrap adapter"
-        ))
+        )
+        .into())
     }
 }
 
@@ -972,7 +978,8 @@ impl RuntimeProcessLifecycle {
         };
         lifecycle
             .supervisor
-            .observe(&lifecycle.event(RuntimeProcessEventKind::Started))?;
+            .observe(&lifecycle.event(RuntimeProcessEventKind::Started))
+            .map_err(String::from)?;
         Ok(lifecycle)
     }
 
@@ -983,12 +990,14 @@ impl RuntimeProcessLifecycle {
     fn attributed(&self) -> Result<(), String> {
         self.supervisor
             .observe(&self.event(RuntimeProcessEventKind::Attributed))
+            .map_err(String::from)
     }
 
     fn terminated(&mut self) -> Result<(), String> {
         if !self.terminated {
             self.supervisor
-                .observe(&self.event(RuntimeProcessEventKind::Terminated))?;
+                .observe(&self.event(RuntimeProcessEventKind::Terminated))
+                .map_err(String::from)?;
             self.terminated = true;
         }
         Ok(())
@@ -1074,6 +1083,10 @@ fn wait_for_process_group_exit(child: &mut Child, grace: Duration) -> bool {
 
 #[cfg(unix)]
 fn configure_process_group(command: &mut Command) {
+    // SAFETY: `pre_exec` runs in the child after fork and before exec. The
+    // closure only calls the async-signal-safe `setpgid(0, 0)` syscall and
+    // converts errno into `std::io::Error`; it does not allocate, lock, or
+    // access shared Rust state.
     unsafe {
         command.pre_exec(|| {
             unsafe extern "C" {
@@ -1103,6 +1116,10 @@ fn configure_linux_launch_limits(
     if address_space.is_none() && file_size.is_none() {
         return Ok(());
     }
+    // SAFETY: `pre_exec` runs in the child after fork and before exec. The
+    // closure only applies fixed `setrlimit` values parsed before registration
+    // and returns OS errors; it does not allocate, lock, or access shared Rust
+    // state.
     unsafe {
         command.pre_exec(move || {
             if let Some(bytes) = address_space {
@@ -1152,6 +1169,9 @@ fn set_process_rlimit(resource: i32, bytes: u64) -> std::io::Result<()> {
         rlim_cur: bytes,
         rlim_max: bytes,
     };
+    // SAFETY: `limit` is a valid pointer to a C-compatible `rlimit` structure
+    // for the duration of the syscall, and `resource` is supplied from the
+    // platform constants guarded by `target_os = "linux"`.
     if unsafe { setrlimit(resource, &limit) } == -1 {
         Err(std::io::Error::last_os_error())
     } else {
@@ -1975,6 +1995,7 @@ sandbox_mode = "workspace-write"
 
         let err = adapter.cancel("session-1", CancelReason::User).unwrap_err();
 
+        let err = err.to_string();
         assert!(err.contains("not implemented"));
         assert!(err.contains("session-1"));
     }
@@ -2048,6 +2069,7 @@ sandbox_mode = "workspace-write"
             .warnings
             .iter()
             .any(|warning| warning.contains("feature-gated")));
+        let err = err.to_string();
         assert!(err.contains("codex.mode = \"app_server\""));
         assert!(err.contains("codex.mode = \"cli_json\""));
     }
@@ -2087,6 +2109,7 @@ sandbox_mode = "workspace-write"
             .warnings
             .iter()
             .any(|warning| warning.contains("feature-gated")));
+        let err = err.to_string();
         assert!(err.contains("codex.mode = \"codex_sdk\""));
         assert!(err.contains("codex.mode = \"cli_json\""));
     }
@@ -2102,6 +2125,7 @@ sandbox_mode = "workspace-write"
             Err(err) => err,
         };
 
+        let err = err.to_string();
         assert!(err.contains("codex.app_server_transport"));
         assert!(err.contains("stdio"));
         assert!(err.contains("websocket"));
@@ -2327,7 +2351,7 @@ sandbox_mode = "workspace-write"
     }
 
     impl RuntimeProcessSupervisor for RecordingSupervisor {
-        fn observe(&self, event: &RuntimeProcessEvent) -> Result<(), String> {
+        fn observe(&self, event: &RuntimeProcessEvent) -> PortResult<()> {
             self.events.lock().unwrap().push(event.kind);
             Ok(())
         }
@@ -2336,7 +2360,7 @@ sandbox_mode = "workspace-write"
             &self,
             _event: &RuntimeProcessEvent,
             _artifact_dir: &Path,
-        ) -> Result<Option<Box<dyn RuntimeProcessMonitor>>, String> {
+        ) -> PortResult<Option<Box<dyn RuntimeProcessMonitor>>> {
             Ok(None)
         }
 
@@ -2345,7 +2369,7 @@ sandbox_mode = "workspace-write"
             _event: Option<&RuntimeProcessEvent>,
             _artifact_dir: &Path,
             _reason: &str,
-        ) -> Result<(), String> {
+        ) -> PortResult<()> {
             Ok(())
         }
     }

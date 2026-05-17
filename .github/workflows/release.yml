@@ -45,6 +45,7 @@ jobs:
 
   build-binaries:
     name: Build CLI binary (${{ matrix.target }})
+    if: ${{ false }}
     needs: resolve-version
     runs-on: ${{ fromJSON(matrix.runs_on) }}
     timeout-minutes: 120
@@ -62,8 +63,8 @@ jobs:
             runs_on: '["self-hosted","macOS","ARM64","agentactr-release-macos-arm64"]'
             binary_path: target/release/agentactr
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Verify native target
         env:
@@ -78,6 +79,97 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --bin agentactr
+
+      - name: Prepare macOS signing credentials
+        if: matrix.target == 'aarch64-apple-darwin'
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          MACOS_CODESIGN_IDENTITY: ${{ vars.MACOS_CODESIGN_IDENTITY }}
+          MACOS_INSTALLER_IDENTITY: ${{ vars.MACOS_INSTALLER_IDENTITY }}
+          MACOS_NOTARY_KEYCHAIN_PROFILE: ${{ vars.MACOS_NOTARY_KEYCHAIN_PROFILE }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          keychain="${RUNNER_TEMP}/agentactr-release-signing.keychain-db"
+          profile="${MACOS_NOTARY_KEYCHAIN_PROFILE:-agentactr-release-notary}"
+
+          if [ -n "${MACOS_CERTIFICATE_P12_BASE64:-}" ]; then
+            test -n "${MACOS_CERTIFICATE_PASSWORD:-}" || { echo "MACOS_CERTIFICATE_PASSWORD secret is required when MACOS_CERTIFICATE_P12_BASE64 is set" >&2; exit 1; }
+            test -n "${MACOS_KEYCHAIN_PASSWORD:-}" || { echo "MACOS_KEYCHAIN_PASSWORD secret is required when importing macOS signing credentials" >&2; exit 1; }
+            printf '%s' "${MACOS_CERTIFICATE_P12_BASE64}" | base64 --decode > "${RUNNER_TEMP}/agentactr-release-signing.p12"
+            security create-keychain -p "${MACOS_KEYCHAIN_PASSWORD}" "${keychain}"
+            security set-keychain-settings -lut 21600 "${keychain}"
+            security unlock-keychain -p "${MACOS_KEYCHAIN_PASSWORD}" "${keychain}"
+            security import "${RUNNER_TEMP}/agentactr-release-signing.p12" \
+              -k "${keychain}" \
+              -P "${MACOS_CERTIFICATE_PASSWORD}" \
+              -T /usr/bin/codesign \
+              -T /usr/bin/productsign \
+              -T /usr/bin/pkgbuild \
+              -T /usr/bin/security
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${MACOS_KEYCHAIN_PASSWORD}" "${keychain}"
+            security list-keychains -d user -s "${keychain}" "$(security default-keychain | tr -d '"')"
+          else
+            keychain="$(security default-keychain | tr -d '"')"
+          fi
+
+          app_identity="${MACOS_CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning "${keychain}" | awk -F '"' '/Developer ID Application/ { print $2; exit }')}"
+          installer_identity="${MACOS_INSTALLER_IDENTITY:-$(security find-identity -v -p basic "${keychain}" | awk -F '"' '/Developer ID Installer/ { print $2; exit }')}"
+          test -n "${app_identity}" || { echo "Developer ID Application identity is required for macOS release binaries" >&2; exit 1; }
+          test -n "${installer_identity}" || { echo "Developer ID Installer identity is required for the macOS pkg release asset" >&2; exit 1; }
+          security find-identity -v -p codesigning "${keychain}" | grep -F "${app_identity}" >/dev/null
+          security find-identity -v -p basic "${keychain}" | grep -F "${installer_identity}" >/dev/null
+
+          if [ -n "${MACOS_NOTARY_APPLE_ID:-}" ] || [ -n "${MACOS_NOTARY_PASSWORD:-}" ] || [ -n "${MACOS_NOTARY_TEAM_ID:-}" ]; then
+            test -n "${MACOS_NOTARY_APPLE_ID:-}" || { echo "MACOS_NOTARY_APPLE_ID secret is required for notary profile creation" >&2; exit 1; }
+            test -n "${MACOS_NOTARY_PASSWORD:-}" || { echo "MACOS_NOTARY_PASSWORD secret is required for notary profile creation" >&2; exit 1; }
+            test -n "${MACOS_NOTARY_TEAM_ID:-}" || { echo "MACOS_NOTARY_TEAM_ID secret is required for notary profile creation" >&2; exit 1; }
+            xcrun notarytool store-credentials "${profile}" \
+              --apple-id "${MACOS_NOTARY_APPLE_ID}" \
+              --team-id "${MACOS_NOTARY_TEAM_ID}" \
+              --password "${MACOS_NOTARY_PASSWORD}" \
+              --keychain "${keychain}"
+          fi
+          xcrun notarytool history --keychain-profile "${profile}" --keychain "${keychain}" >/dev/null
+
+          {
+            echo "MACOS_RELEASE_KEYCHAIN=${keychain}"
+            echo "MACOS_CODESIGN_IDENTITY_EFFECTIVE=${app_identity}"
+            echo "MACOS_INSTALLER_IDENTITY_EFFECTIVE=${installer_identity}"
+            echo "MACOS_NOTARY_PROFILE_EFFECTIVE=${profile}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Sign and notarize macOS CLI binary
+        if: matrix.target == 'aarch64-apple-darwin'
+        env:
+          BINARY_PATH: ${{ matrix.binary_path }}
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/notary
+          asset="agentactr-${VERSION}-${TARGET}"
+          codesign --force --options runtime --timestamp --sign "${MACOS_CODESIGN_IDENTITY_EFFECTIVE}" "${BINARY_PATH}"
+          codesign --verify --strict --verbose=4 "${BINARY_PATH}"
+          codesign -dv --verbose=4 "${BINARY_PATH}" 2>&1 | tee "dist/${asset}.codesign.txt"
+          grep -F 'Signature=adhoc' "dist/${asset}.codesign.txt" && { echo "macOS release binary must not be ad-hoc signed" >&2; exit 1; }
+          grep -E 'TeamIdentifier=[A-Z0-9]+' "dist/${asset}.codesign.txt" >/dev/null
+
+          cp "${BINARY_PATH}" "dist/notary/${asset}"
+          chmod 0755 "dist/notary/${asset}"
+          (
+            cd dist/notary
+            ditto -c -k --keepParent "${asset}" "${asset}.zip"
+          )
+          xcrun notarytool submit "dist/notary/${asset}.zip" \
+            --keychain-profile "${MACOS_NOTARY_PROFILE_EFFECTIVE}" \
+            --keychain "${MACOS_RELEASE_KEYCHAIN}" \
+            --wait
+          spctl --assess --type execute --verbose=4 "${BINARY_PATH}"
 
       - name: Package release binary
         env:
@@ -97,40 +189,71 @@ jobs:
             shasum -a 256 "dist/${asset}.tar.gz" > "dist/${asset}.tar.gz.sha256"
           fi
 
+      - name: Package signed and notarized macOS installer
+        if: matrix.target == 'aarch64-apple-darwin'
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          BINARY_PATH: ${{ matrix.binary_path }}
+        run: |
+          set -euo pipefail
+          asset="agentactr-${VERSION}-${TARGET}"
+          pkg_root="${RUNNER_TEMP}/${asset}-pkgroot"
+          unsigned_pkg="${RUNNER_TEMP}/${asset}.unsigned.pkg"
+          signed_pkg="dist/${asset}.pkg"
+          mkdir -p "${pkg_root}/usr/local/bin"
+          cp "${BINARY_PATH}" "${pkg_root}/usr/local/bin/agentactr"
+          chmod 0755 "${pkg_root}/usr/local/bin/agentactr"
+          pkgbuild \
+            --root "${pkg_root}" \
+            --identifier "io.github.dwaiba.agentactr" \
+            --version "${VERSION}" \
+            --install-location "/" \
+            "${unsigned_pkg}"
+          productsign --sign "${MACOS_INSTALLER_IDENTITY_EFFECTIVE}" "${unsigned_pkg}" "${signed_pkg}"
+          xcrun notarytool submit "${signed_pkg}" \
+            --keychain-profile "${MACOS_NOTARY_PROFILE_EFFECTIVE}" \
+            --keychain "${MACOS_RELEASE_KEYCHAIN}" \
+            --wait
+          xcrun stapler staple "${signed_pkg}"
+          xcrun stapler validate "${signed_pkg}"
+          spctl --assess --type install --verbose=4 "${signed_pkg}"
+          shasum -a 256 "${signed_pkg}" > "${signed_pkg}.sha256"
+
       - name: Attest CLI binary archive
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4
         with:
           subject-path: dist/agentactr-*.tar.gz
 
+      - name: Attest macOS installer package
+        if: matrix.target == 'aarch64-apple-darwin'
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4
+        with:
+          subject-path: dist/agentactr-*.pkg
+
       - name: Upload CLI binary archive
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: agentactr-${{ matrix.target }}
           path: |
             dist/agentactr-*.tar.gz
             dist/agentactr-*.tar.gz.sha256
+            dist/agentactr-*.pkg
+            dist/agentactr-*.pkg.sha256
           if-no-files-found: error
 
   release:
     name: Publish release artifacts
     needs:
       - resolve-version
-      - build-binaries
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v6
-      - uses: depot/setup-action@v1
-
-      - name: Download CLI binary archives
-        uses: actions/download-artifact@v7
-        with:
-          pattern: agentactr-*
-          path: dist
-          merge-multiple: true
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1
 
       - name: Login to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -147,7 +270,7 @@ jobs:
 
       - name: Build and push runtime image with Depot
         id: runtime-image
-        uses: depot/build-push-action@v1
+        uses: depot/build-push-action@5f3b3c2e5a00f0093de47f657aeaefcedff27d18 # v1
         with:
           project: ${{ vars.DEPOT_PROJECT_ID }}
           token: ${{ secrets.DEPOT_TOKEN }}
@@ -165,7 +288,7 @@ jobs:
 
       - name: Build and push static CLI image with Depot
         id: cli-image
-        uses: depot/build-push-action@v1
+        uses: depot/build-push-action@5f3b3c2e5a00f0093de47f657aeaefcedff27d18 # v1
         with:
           project: ${{ vars.DEPOT_PROJECT_ID }}
           token: ${{ secrets.DEPOT_TOKEN }}
@@ -210,29 +333,24 @@ jobs:
               '- Rust CLI for provider-neutral coding-agent orchestration.' \
               '- Default Codex, GitHub, Git, Docker, and local artifact integrations.' \
               '- Run-scoped artifacts, trace/debug bundles, quality gates, and issue workflows.' \
-              '- Native CLI archives for Linux x86_64, Linux arm64, and Apple Silicon macOS.' \
               '- Docker runtime and static CLI images for linux/arm64.' \
+              '- Native CLI binaries are not attached to this release; build locally from source.' \
               '- Secure-by-default lifecycle, manifest, and replay/audit hardening.' \
               '' >> "${notes}"
           fi
           printf '%s\n' \
-            'Release assets:' \
-            "- \`agentactr-${VERSION}-x86_64-unknown-linux-gnu.tar.gz\`" \
-            "- \`agentactr-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256\`" \
-            "- \`agentactr-${VERSION}-aarch64-unknown-linux-gnu.tar.gz\`" \
-            "- \`agentactr-${VERSION}-aarch64-unknown-linux-gnu.tar.gz.sha256\`" \
-            "- \`agentactr-${VERSION}-aarch64-apple-darwin.tar.gz\`" \
-            "- \`agentactr-${VERSION}-aarch64-apple-darwin.tar.gz.sha256\`" \
-            '' \
             'Published images:' \
             "- \`ghcr.io/dwaiba/agentactr-runtime:${VERSION}-linux-arm64\`" \
             "- \`ghcr.io/dwaiba/agentactr-cli:${VERSION}-linux-arm64-musl\`" \
+            '' \
+            'Local CLI build:' \
+            '- Native binary archives are intentionally omitted from this release. Build locally with `cargo build --release --bin agentactr` and use `target/release/agentactr`.' \
             '' \
             'GHCR may show an additional `unknown/unknown` manifest entry for each image. That entry is the attached BuildKit SBOM/provenance attestation manifest, not a second runnable image platform.' \
             >> "${notes}"
 
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           tag_name: v${{ needs.resolve-version.outputs.version }}
           target_commitish: ${{ github.sha }}
@@ -241,6 +359,4 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            dist/agentactr-*.tar.gz
-            dist/agentactr-*.tar.gz.sha256
             .agentactr/image-metadata/*.json

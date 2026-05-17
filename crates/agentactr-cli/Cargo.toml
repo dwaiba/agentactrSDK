@@ -2,6 +2,7 @@
 name = "agentactr-cli"
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 version.workspace = true
 
 [[bin]]
@@ -9,18 +10,21 @@ name = "agentactr"
 path = "src/main.rs"
 
 [dependencies]
-agentactr-codex = { path = "../agentactr-codex" }
-agentactr-execution = { path = "../agentactr-execution" }
-agentactr-sdk = { path = "../agentactr-sdk" }
-clap = { version = "4", features = ["derive"] }
-clap_complete = "4"
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
-serde_json = "1"
-sha2 = "0.11"
-sqlx-core = { version = "0.8", default-features = false, features = ["_rt-tokio"] }
-sqlx-sqlite = { version = "0.8", default-features = false, features = ["bundled", "migrate"] }
-tokio = { version = "1", default-features = false, features = ["rt"] }
-toml = "1.1"
-toml_edit = "0.25"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+agentactr-codex.workspace = true
+agentactr-execution.workspace = true
+agentactr-sdk.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx-core.workspace = true
+sqlx-sqlite.workspace = true
+tokio.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

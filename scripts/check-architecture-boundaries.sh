@@ -46,7 +46,30 @@ require_text 'pub fn docker_command' "agentactr-execution must own Docker comman
 require_text 'pub fn should_pull_image' "agentactr-execution must own Docker image pull policy helpers." crates/agentactr-execution/src/lib.rs
 
 require_text 'struct GithubRestAdapter' "agentactr-cli must own the current default GitHub adapter packaging shortcut." crates/agentactr-cli/src/adapters.rs
-require_text 'struct LocalGitAdapter' "agentactr-cli must own the current default local Git adapter packaging shortcut." crates/agentactr-cli/src/adapters.rs
+require_text 'struct LocalGitAdapter' "agentactr-cli must own the current default local Git adapter packaging shortcut." crates/agentactr-cli/src/vcs_adapter.rs
+require_text 'fn cmd_vcs' "agentactr-cli must keep VCS command dispatch in the focused VCS command module." crates/agentactr-cli/src/vcs_commands.rs
+require_text 'fn cmd_bootstrap' "agentactr-cli must keep blank-project scaffolding in the focused bootstrap command module." crates/agentactr-cli/src/bootstrap_project.rs
+require_text 'fn command_catalog' "agentactr-cli must keep command inventory in the focused command catalog module." crates/agentactr-cli/src/command_catalog.rs
+require_text 'fn cmd_docs' "agentactr-cli must keep CLI docs rendering in the focused docs command module." crates/agentactr-cli/src/docs_command.rs
+require_text 'fn cmd_mcp' "agentactr-cli must keep stdio MCP serving in the focused MCP command module." crates/agentactr-cli/src/mcp_command.rs
+require_text 'fn cmd_trace' "agentactr-cli must keep trace inspection in the focused trace command module." crates/agentactr-cli/src/trace_command.rs
+require_text 'fn cmd_debug' "agentactr-cli must keep debug bundle assembly in the focused debug bundle module." crates/agentactr-cli/src/debug_bundle.rs
+require_text 'fn cmd_issue' "agentactr-cli must keep issue command dispatch in the focused issue command module." crates/agentactr-cli/src/issue_commands.rs
+require_text 'fn cmd_quality' "agentactr-cli must keep quality command dispatch in the focused quality command module." crates/agentactr-cli/src/quality_command.rs
+require_text 'fn run_quality_command' "agentactr-cli must keep quality command execution in the focused quality command module." crates/agentactr-cli/src/quality_command.rs
+require_text 'fn cmd_init' "agentactr-cli must keep setup/init command dispatch in the focused setup command module." crates/agentactr-cli/src/setup_commands.rs
+require_text 'fn cmd_doctor' "agentactr-cli must keep doctor command dispatch in the focused setup command module." crates/agentactr-cli/src/setup_commands.rs
+require_text 'fn cmd_config' "agentactr-cli must keep config command dispatch in the focused setup command module." crates/agentactr-cli/src/setup_commands.rs
+require_text 'fn cmd_auth' "agentactr-cli must keep auth command dispatch in the focused setup command module." crates/agentactr-cli/src/setup_commands.rs
+require_text 'fn collect_artifact_integrity' "agentactr-cli must keep artifact integrity verification in the focused artifacts module." crates/agentactr-cli/src/artifacts.rs
+forbid_text 'fn cmd_issue|fn cmd_quality|fn cmd_init|fn cmd_doctor|fn cmd_config|fn cmd_auth' \
+  "agentactr-cli main.rs must only wire focused command modules, not own split command implementations." \
+  crates/agentactr-cli/src/main.rs
+forbid_text '^use crate::\*;' \
+  "focused CLI command modules must import explicit dependencies instead of using crate-wide wildcard imports." \
+  crates/agentactr-cli/src/issue_commands.rs \
+  crates/agentactr-cli/src/quality_command.rs \
+  crates/agentactr-cli/src/setup_commands.rs
 require_text 'struct CliCodexMemorySupervisor' "agentactr-cli must own the current Codex memory supervisor wiring." crates/agentactr-cli/src/adapters.rs
 require_text 'struct LinuxMemoryController' "agentactr-cli must own the current Linux memory controller packaging shortcut." crates/agentactr-cli/src/linux_memory.rs
 require_text 'memory\.pressure' "Linux memory implementation must read PSI memory pressure evidence." crates/agentactr-cli/src/linux_memory.rs

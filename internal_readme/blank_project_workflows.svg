@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="430" viewBox="0 0 1180 430" role="img" aria-labelledby="title desc">
+  <title id="title">Blank local and GitHub-backed project workflows</title>
+  <desc id="desc">Shows that local bootstrap and init do not require GitHub, while issue discovery, issue drafting, issue submission, and run issue require a concrete tracker repository.</desc>
+  <style>
+    .local { fill:#ecfdf5; stroke:#047857; stroke-width:1.5; rx:8; }
+    .repo { fill:#f8fafc; stroke:#334155; stroke-width:1.5; rx:8; }
+    .mut { fill:#fff7ed; stroke:#c2410c; stroke-width:1.5; rx:8; }
+    .warn { fill:#fefce8; stroke:#a16207; stroke-width:1.5; rx:8; }
+    .text { font-family:Arial, sans-serif; font-size:15px; fill:#0f172a; }
+    .small { font-family:Arial, sans-serif; font-size:12px; fill:#334155; }
+    .label { font-family:Arial, sans-serif; font-size:13px; font-weight:bold; fill:#0f172a; }
+    .arrow { stroke:#334155; stroke-width:1.6; fill:none; marker-end:url(#arrow); }
+    .dash { stroke:#64748b; stroke-width:1.3; stroke-dasharray:5 5; fill:none; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+  </defs>
+
+  <text x="40" y="34" class="label">Local-only blank bootstrap</text>
+  <rect x="35" y="55" width="170" height="82" class="local"/>
+  <text x="55" y="87" class="text">empty directory</text>
+  <text x="55" y="111" class="small">no remote, no token</text>
+  <text x="55" y="127" class="small">no first issue</text>
+
+  <rect x="250" y="55" width="205" height="82" class="local"/>
+  <text x="270" y="87" class="text">bootstrap project</text>
+  <text x="270" y="111" class="small">writes scaffold files</text>
+  <text x="270" y="127" class="small">no network/install</text>
+
+  <rect x="500" y="55" width="205" height="82" class="local"/>
+  <text x="520" y="87" class="text">init --yes</text>
+  <text x="520" y="111" class="small">local config/Codex files</text>
+  <text x="520" y="127" class="small">OWNER/REPO placeholder</text>
+
+  <rect x="750" y="55" width="205" height="82" class="local"/>
+  <text x="770" y="87" class="text">declare stack</text>
+  <text x="770" y="111" class="small">doctor/quality plan</text>
+  <text x="770" y="127" class="small">local readiness only</text>
+
+  <path d="M205 96 H250" class="arrow"/>
+  <path d="M455 96 H500" class="arrow"/>
+  <path d="M705 96 H750" class="arrow"/>
+
+  <text x="40" y="205" class="label">GitHub-backed issue workflow</text>
+  <rect x="35" y="226" width="170" height="82" class="repo"/>
+  <text x="55" y="258" class="text">configure repo</text>
+  <text x="55" y="282" class="small">tracker.repo or --repo</text>
+  <text x="55" y="298" class="small">GitHub token</text>
+
+  <rect x="250" y="226" width="170" height="82" class="repo"/>
+  <text x="270" y="258" class="text">issue find</text>
+  <text x="270" y="282" class="small">read tracker inventory</text>
+  <text x="270" y="298" class="small">dedupe candidates</text>
+
+  <rect x="465" y="226" width="185" height="82" class="repo"/>
+  <text x="485" y="258" class="text">issue draft</text>
+  <text x="485" y="282" class="small">requires --repo today</text>
+  <text x="485" y="298" class="small">local proposals</text>
+
+  <rect x="695" y="226" width="175" height="82" class="repo"/>
+  <text x="715" y="258" class="text">issue proposals</text>
+  <text x="715" y="282" class="small">human review</text>
+  <text x="715" y="298" class="small">local artifact read</text>
+
+  <rect x="915" y="226" width="195" height="82" class="mut"/>
+  <text x="935" y="258" class="text">issue submit --yes</text>
+  <text x="935" y="282" class="small">GitHub mutation</text>
+  <text x="935" y="298" class="small">creates first issue</text>
+
+  <path d="M205 267 H250" class="arrow"/>
+  <path d="M420 267 H465" class="arrow"/>
+  <path d="M650 267 H695" class="arrow"/>
+  <path d="M870 267 H915" class="arrow"/>
+
+  <rect x="465" y="345" width="405" height="58" class="warn"/>
+  <text x="485" y="371" class="text">No offline issue drafting yet</text>
+  <text x="485" y="392" class="small">Current issue draft fetches tracker inventory for dedupe before writing proposals.</text>
+  <path d="M557 308 V345" class="arrow"/>
+
+  <path d="M852 137 V192 H120 V226" class="dash"/>
+  <text x="692" y="184" class="small">configure tracker only when issue automation starts</text>
+</svg>

@@ -18,8 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: rustfmt, clippy
 
@@ -43,9 +43,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v6
-      - uses: docker/setup-qemu-action@v4
-      - uses: depot/setup-action@v1
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
+      - uses: depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1
 
       - name: Check Depot configuration
         env:
@@ -58,7 +58,7 @@ jobs:
 
       - name: Build runtime image with Depot
         id: runtime-image
-        uses: depot/build-push-action@v1
+        uses: depot/build-push-action@5f3b3c2e5a00f0093de47f657aeaefcedff27d18 # v1
         with:
           project: ${{ vars.DEPOT_PROJECT_ID }}
           token: ${{ secrets.DEPOT_TOKEN }}
@@ -76,7 +76,7 @@ jobs:
 
       - name: Build static CLI image with Depot
         id: cli-image
-        uses: depot/build-push-action@v1
+        uses: depot/build-push-action@5f3b3c2e5a00f0093de47f657aeaefcedff27d18 # v1
         with:
           project: ${{ vars.DEPOT_PROJECT_ID }}
           token: ${{ secrets.DEPOT_TOKEN }}

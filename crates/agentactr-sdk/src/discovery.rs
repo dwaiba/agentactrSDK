@@ -11,6 +11,8 @@ use crate::domains::{
 use agentactr_core::{AgentactrConfig, DomainGraph, DomainProfile, DomainQualityGate};
 
 const DEFAULT_QUALITY_PROFILE: &str = "strict";
+const QUALITY_PROFILE_STANDARD: &str = "standard";
+const QUALITY_PROFILE_MINIMAL: &str = "minimal";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum StackKind {
@@ -84,16 +86,45 @@ pub fn discover_repository(root: &Path) -> RepoInspection {
 }
 
 pub fn discover_repository_with_config(root: &Path, config: &AgentactrConfig) -> RepoInspection {
-    discover_repository_inner(root, Some(config))
+    let inspection = discover_repository_inner(root, Some(config));
+    match declared_stack_from_config(config) {
+        Some(stack) => apply_declared_stack_to_inspection_with_config(inspection, &stack, config),
+        None => inspection,
+    }
+}
+
+fn declared_stack_from_config(config: &AgentactrConfig) -> Option<StackKind> {
+    match config
+        .repository
+        .declared_primary_stack
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "typescript" => Some(StackKind::TypeScript),
+        "rust" => Some(StackKind::Rust),
+        "golang" | "go" => Some(StackKind::Golang),
+        "python" => Some(StackKind::Python),
+        _ => None,
+    }
 }
 
 fn discover_repository_inner(root: &Path, config: Option<&AgentactrConfig>) -> RepoInspection {
+    let selected_quality_profile = config
+        .map(|config| normalize_quality_profile(&config.quality.profile))
+        .unwrap_or(DEFAULT_QUALITY_PROFILE)
+        .to_string();
     let is_git = root.join(".git").exists();
     let files = collect_repo_files(root);
     let is_empty = files.is_empty();
     let evidence = score_evidence(&files);
     let (primary_stack, confidence) = select_stack(&evidence);
-    let mut missing_prerequisites = missing_prerequisites(root, &primary_stack, is_empty);
+    let mut missing_prerequisites = missing_prerequisites_for_profile(
+        root,
+        &primary_stack,
+        is_empty,
+        &selected_quality_profile,
+    );
     let mut setup_guidance = setup_guidance_for(root, &primary_stack, is_empty);
 
     if is_empty {
@@ -121,7 +152,8 @@ fn discover_repository_inner(root: &Path, config: Option<&AgentactrConfig>) -> R
         || domain_quality_plan(root),
         |config| domain_quality_plan_with_config(root, config),
     );
-    let quality_plan = quality_plan_for_repository(root, &primary_stack);
+    let quality_plan =
+        quality_plan_for_repository_with_profile(root, &primary_stack, &selected_quality_profile);
     let domain_quality_plan =
         compose_typed_domain_quality_plan(&primary_stack, &quality_plan, base_domain_quality_plan);
     let domain_graph = config.map_or_else(
@@ -139,7 +171,7 @@ fn discover_repository_inner(root: &Path, config: Option<&AgentactrConfig>) -> R
         evidence_files: evidence.files,
         missing_prerequisites,
         setup_guidance,
-        selected_quality_profile: DEFAULT_QUALITY_PROFILE.to_string(),
+        selected_quality_profile,
         quality_plan,
         domain_profiles,
         domain_quality_plan,
@@ -151,16 +183,25 @@ pub fn apply_declared_stack_to_inspection(
     mut inspection: RepoInspection,
     stack: &StackKind,
 ) -> RepoInspection {
+    let selected_quality_profile = inspection.selected_quality_profile.clone();
     inspection.primary_stack = stack.clone();
     inspection.confidence = 100;
     inspection.evidence_files = vec![format!(
         "config:repository.declared_primary_stack={}",
         stack.as_str()
     )];
-    inspection.missing_prerequisites =
-        missing_prerequisites(&inspection.root, stack, inspection.is_empty);
+    inspection.missing_prerequisites = missing_prerequisites_for_profile(
+        &inspection.root,
+        stack,
+        inspection.is_empty,
+        &selected_quality_profile,
+    );
     inspection.setup_guidance = setup_guidance_for(&inspection.root, stack, inspection.is_empty);
-    inspection.quality_plan = quality_plan_for_repository(&inspection.root, stack);
+    inspection.quality_plan = quality_plan_for_repository_with_profile(
+        &inspection.root,
+        stack,
+        &selected_quality_profile,
+    );
     inspection.domain_profiles = detect_domain_profiles(&inspection.root);
     inspection.domain_quality_plan = compose_typed_domain_quality_plan(
         stack,
@@ -177,6 +218,19 @@ pub fn apply_declared_stack_to_inspection_with_config(
     config: &AgentactrConfig,
 ) -> RepoInspection {
     let mut inspection = apply_declared_stack_to_inspection(inspection, stack);
+    let selected_quality_profile = normalize_quality_profile(&config.quality.profile).to_string();
+    inspection.selected_quality_profile = selected_quality_profile.clone();
+    inspection.missing_prerequisites = missing_prerequisites_for_profile(
+        &inspection.root,
+        stack,
+        inspection.is_empty,
+        &selected_quality_profile,
+    );
+    inspection.quality_plan = quality_plan_for_repository_with_profile(
+        &inspection.root,
+        stack,
+        &selected_quality_profile,
+    );
     inspection.domain_profiles = detect_domain_profiles_with_config(&inspection.root, config);
     inspection.domain_quality_plan = compose_typed_domain_quality_plan(
         stack,
@@ -185,6 +239,14 @@ pub fn apply_declared_stack_to_inspection_with_config(
     );
     inspection.domain_graph = build_domain_graph_with_config(&inspection.root, "local", config);
     inspection
+}
+
+fn normalize_quality_profile(value: &str) -> &'static str {
+    match value.trim().to_ascii_lowercase().as_str() {
+        QUALITY_PROFILE_STANDARD => QUALITY_PROFILE_STANDARD,
+        QUALITY_PROFILE_MINIMAL => QUALITY_PROFILE_MINIMAL,
+        _ => DEFAULT_QUALITY_PROFILE,
+    }
 }
 
 fn compose_typed_domain_quality_plan(
@@ -357,6 +419,19 @@ pub fn quality_plan_for_stack(stack: &StackKind) -> Vec<QualityCommand> {
 }
 
 pub fn quality_plan_for_repository(root: &Path, stack: &StackKind) -> Vec<QualityCommand> {
+    quality_plan_for_repository_with_profile(root, stack, DEFAULT_QUALITY_PROFILE)
+}
+
+fn quality_plan_for_repository_with_profile(
+    root: &Path,
+    stack: &StackKind,
+    profile: &str,
+) -> Vec<QualityCommand> {
+    let plan = strict_quality_plan_for_repository(root, stack);
+    quality_plan_for_profile(plan, stack, normalize_quality_profile(profile))
+}
+
+fn strict_quality_plan_for_repository(root: &Path, stack: &StackKind) -> Vec<QualityCommand> {
     match stack {
         StackKind::TypeScript => typescript_quality_plan(root),
         StackKind::Golang => golang_quality_plan(root),
@@ -376,6 +451,71 @@ pub fn quality_plan_for_repository(root: &Path, stack: &StackKind) -> Vec<Qualit
         }
         _ => quality_plan_for_stack(stack),
     }
+}
+
+fn quality_plan_for_profile(
+    plan: Vec<QualityCommand>,
+    stack: &StackKind,
+    profile: &str,
+) -> Vec<QualityCommand> {
+    match profile {
+        DEFAULT_QUALITY_PROFILE => plan,
+        QUALITY_PROFILE_STANDARD => standard_quality_plan(plan, stack),
+        QUALITY_PROFILE_MINIMAL => minimal_quality_plan(plan, stack),
+        _ => plan,
+    }
+}
+
+fn standard_quality_plan(plan: Vec<QualityCommand>, stack: &StackKind) -> Vec<QualityCommand> {
+    plan.into_iter()
+        .filter_map(|mut command| match stack {
+            StackKind::Rust => match command.name.as_str() {
+                "nextest" => {
+                    command.name = "test".to_string();
+                    command.command = "cargo test --workspace --all-features".to_string();
+                    Some(command)
+                }
+                "deny" | "machete" => None,
+                _ => Some(command),
+            },
+            StackKind::Golang => match command.name.as_str() {
+                "golangci_lint" | "vulncheck" => None,
+                _ => Some(command),
+            },
+            StackKind::Python => match command.name.as_str() {
+                "audit" | "deps" => None,
+                _ => Some(command),
+            },
+            StackKind::Mixed => Some(command),
+            StackKind::TypeScript | StackKind::Unknown => Some(command),
+        })
+        .collect()
+}
+
+fn minimal_quality_plan(plan: Vec<QualityCommand>, stack: &StackKind) -> Vec<QualityCommand> {
+    plan.into_iter()
+        .filter_map(|mut command| {
+            let keep = match stack {
+                StackKind::Rust => match command.name.as_str() {
+                    "fmt" => true,
+                    "nextest" => {
+                        command.name = "test".to_string();
+                        command.command = "cargo test --workspace".to_string();
+                        true
+                    }
+                    _ => false,
+                },
+                StackKind::Golang => matches!(command.name.as_str(), "gofmt" | "test"),
+                StackKind::Python => matches!(command.name.as_str(), "format" | "lint" | "test"),
+                StackKind::TypeScript => {
+                    matches!(command.name.as_str(), "install" | "lint" | "test" | "build")
+                }
+                StackKind::Mixed => true,
+                StackKind::Unknown => false,
+            };
+            keep.then_some(command)
+        })
+        .collect()
 }
 
 fn commands(values: &[(&str, &str)]) -> Vec<QualityCommand> {
@@ -920,9 +1060,31 @@ fn detected_stacks(e: &StackEvidence) -> Vec<StackKind> {
     stacks
 }
 
-fn missing_prerequisites(root: &Path, stack: &StackKind, is_empty: bool) -> Vec<String> {
+fn missing_prerequisites_for_profile(
+    root: &Path,
+    stack: &StackKind,
+    is_empty: bool,
+    profile: &str,
+) -> Vec<String> {
     if is_empty {
         return Vec::new();
+    }
+    let profile = normalize_quality_profile(profile);
+    if profile != DEFAULT_QUALITY_PROFILE {
+        return match stack {
+            StackKind::Mixed => {
+                let detected = detected_stacks_for_root(root);
+                if detected.is_empty() {
+                    vec!["mixed stack requires detected or configured member stacks".into()]
+                } else {
+                    Vec::new()
+                }
+            }
+            StackKind::Unknown => {
+                vec!["unable to detect a supported stack with high confidence".into()]
+            }
+            _ => Vec::new(),
+        };
     }
     let mut missing = Vec::new();
     match stack {
@@ -1003,7 +1165,12 @@ fn missing_prerequisites(root: &Path, stack: &StackKind, is_empty: bool) -> Vec<
                 missing.push("mixed stack requires detected or configured member stacks".into());
             } else {
                 for stack in detected {
-                    missing.extend(missing_prerequisites(root, &stack, false));
+                    missing.extend(missing_prerequisites_for_profile(
+                        root,
+                        &stack,
+                        false,
+                        DEFAULT_QUALITY_PROFILE,
+                    ));
                 }
                 missing.sort();
                 missing.dedup();
@@ -1404,6 +1571,41 @@ mod tests {
             .domain_quality_plan
             .iter()
             .any(|gate| gate.name == "language_rust_stack_contract"));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn configured_quality_profile_controls_repository_inspection() {
+        let root = temp_root("rust-standard-profile");
+        fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let mut config = AgentactrConfig::strict_defaults("OWNER/REPO");
+        config.quality.profile = "standard".to_string();
+
+        let inspection = discover_repository_with_config(&root, &config);
+
+        assert_eq!(inspection.primary_stack, StackKind::Rust);
+        assert_eq!(inspection.selected_quality_profile, "standard");
+        assert!(!inspection
+            .missing_prerequisites
+            .iter()
+            .any(|item| item.contains("strict profile")));
+        assert!(inspection.quality_plan.iter().any(
+            |cmd| cmd.name == "test" && cmd.command == "cargo test --workspace --all-features"
+        ));
+        assert!(!inspection
+            .quality_plan
+            .iter()
+            .any(|cmd| matches!(cmd.name.as_str(), "nextest" | "deny" | "machete")));
+        assert!(inspection.domain_quality_plan.iter().any(|gate| {
+            gate.domain == "language.rust"
+                && gate.name == "language_rust_test"
+                && gate.command.as_deref() == Some("cargo test --workspace --all-features")
+        }));
 
         fs::remove_dir_all(root).unwrap();
     }

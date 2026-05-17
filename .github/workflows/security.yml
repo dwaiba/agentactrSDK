@@ -27,13 +27,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4
         with:
           languages: rust
 
-      - uses: github/codeql-action/analyze@v4
+      - uses: github/codeql-action/analyze@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4
 
   dependency-review:
     name: Dependency review
@@ -41,9 +41,9 @@ jobs:
     timeout-minutes: 10
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - uses: actions/dependency-review-action@v5
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5
         with:
           fail-on-severity: high
 
@@ -52,8 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install ripgrep
         run: sudo apt-get update && sudo apt-get install -y ripgrep
@@ -91,7 +91,16 @@ jobs:
       - name: GitHub Actions references are explicit
         run: |
           set -euo pipefail
-          if rg -n 'uses: [^@[:space:]]+($|[[:space:]]+#)' .github/workflows; then
-            echo "Every external action reference must include an explicit ref." >&2
+          if rg -n '^[[:space:]]*-?[[:space:]]*uses: [^@[:space:]#]+($|[[:space:]]+#)' .github/workflows; then
+            echo "Every external action reference must include an immutable commit SHA." >&2
+            exit 1
+          fi
+          unpinned_actions="$(
+            rg -n '^[[:space:]]*-?[[:space:]]*uses: [^@[:space:]#]+@[^[:space:]#]+' .github/workflows |
+              rg -v '@[0-9A-Fa-f]{40}([[:space:]]+#.*)?$' || true
+          )"
+          if [ -n "${unpinned_actions}" ]; then
+            printf '%s\n' "${unpinned_actions}" >&2
+            echo "Every external action reference must be pinned to a 40-character commit SHA; put tag names in comments only." >&2
             exit 1
           fi

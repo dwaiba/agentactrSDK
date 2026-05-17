@@ -3,8 +3,8 @@ use agentactr_sdk::{
     AdapterCapabilities, AdapterVersionReport, AgentRunId, HelperMemoryCandidate,
     LinuxMemoryConfig, MemoryAction, MemoryActionResult, MemoryController, MemoryGovernorPolicy,
     MemoryGroup, MemoryGroupId, MemoryGroupRequest, MemoryLease, MemoryPolicyRef,
-    MemoryPressureSnapshot, MemoryPressureTransition, MemorySample, RunResourceGovernor,
-    RuntimeProcessEvent, RuntimeProcessSupervisor,
+    MemoryPressureSnapshot, MemoryPressureTransition, MemorySample, PortResult,
+    RunResourceGovernor, RuntimeProcessEvent, RuntimeProcessSupervisor,
 };
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
@@ -543,7 +543,7 @@ impl MemoryController for LinuxMemoryController {
         }
     }
 
-    fn create_run_group(&self, req: MemoryGroupRequest) -> Result<MemoryGroup, String> {
+    fn create_run_group(&self, req: MemoryGroupRequest) -> PortResult<MemoryGroup> {
         let path = req.path.unwrap_or_else(|| self.cgroup_root.clone());
         if self.should_enforce() {
             fs::create_dir_all(&path)
@@ -555,11 +555,11 @@ impl MemoryController for LinuxMemoryController {
         })
     }
 
-    fn attach_pid(&self, group: &MemoryGroup, pid: u32) -> Result<(), String> {
-        attach_pid_to_cgroup(memory_group_path(group)?, pid)
+    fn attach_pid(&self, group: &MemoryGroup, pid: u32) -> PortResult<()> {
+        Ok(attach_pid_to_cgroup(memory_group_path(group)?, pid)?)
     }
 
-    fn sample(&self, group: &MemoryGroup) -> Result<MemorySample, String> {
+    fn sample(&self, group: &MemoryGroup) -> PortResult<MemorySample> {
         let payload = sample_cgroup(memory_group_path(group)?)?;
         Ok(MemorySample {
             payload_json: serde_json::to_string(&payload)
@@ -567,7 +567,7 @@ impl MemoryController for LinuxMemoryController {
         })
     }
 
-    fn reclaim(&self, group: &MemoryGroup, bytes: u64) -> Result<MemoryActionResult, String> {
+    fn reclaim(&self, group: &MemoryGroup, bytes: u64) -> PortResult<MemoryActionResult> {
         let group_id = memory_group_id(group);
         let action = MemoryAction::Reclaim { group_id, bytes };
         match reclaim_cgroup_memory(memory_group_path(group)?, bytes) {
@@ -583,7 +583,7 @@ impl MemoryController for LinuxMemoryController {
         &self,
         group: &MemoryGroup,
         terminal_cleanup: bool,
-    ) -> Result<MemoryActionResult, String> {
+    ) -> PortResult<MemoryActionResult> {
         let action = MemoryAction::KillGroup {
             group_id: memory_group_id(group),
             terminal_cleanup,
@@ -597,7 +597,7 @@ impl MemoryController for LinuxMemoryController {
         }
     }
 
-    fn finalize_group(&self, group: &MemoryGroup) -> Result<MemoryActionResult, String> {
+    fn finalize_group(&self, group: &MemoryGroup) -> PortResult<MemoryActionResult> {
         let action = MemoryAction::KillGroup {
             group_id: memory_group_id(group),
             terminal_cleanup: true,
@@ -1096,7 +1096,7 @@ fn execute_memory_actions(
                             .to_string()
                     })
                     .and_then(|supervisor| {
-                        supervisor.cancel_process_tree(&target.runtime_event, reason)
+                        Ok(supervisor.cancel_process_tree(&target.runtime_event, reason)?)
                     });
                 let outcome = match supervisor_result {
                     Ok(detail) => json!({
@@ -1223,14 +1223,14 @@ fn execute_memory_actions(
                             .to_string()
                     })
                     .and_then(|supervisor| {
-                        supervisor.cancel_process_tree(
+                        Ok(supervisor.cancel_process_tree(
                             &target.runtime_event,
                             if *terminal_cleanup {
                                 "terminal memory cleanup"
                             } else {
                                 "memory group cleanup"
                             },
-                        )
+                        )?)
                     });
                 let cgroup_outcome = match kill_cgroup(&target.cgroup) {
                     Ok(()) => json!({
@@ -1614,7 +1614,7 @@ mod tests {
             &self,
             _event: &RuntimeProcessEvent,
             _artifact_dir: &Path,
-        ) -> Result<Option<Box<dyn agentactr_sdk::RuntimeProcessMonitor>>, String> {
+        ) -> PortResult<Option<Box<dyn agentactr_sdk::RuntimeProcessMonitor>>> {
             Ok(None)
         }
 
@@ -1623,7 +1623,7 @@ mod tests {
             _event: Option<&RuntimeProcessEvent>,
             _artifact_dir: &Path,
             _reason: &str,
-        ) -> Result<(), String> {
+        ) -> PortResult<()> {
             Ok(())
         }
 
@@ -1631,7 +1631,7 @@ mod tests {
             &self,
             _event: &RuntimeProcessEvent,
             reason: &str,
-        ) -> Result<String, String> {
+        ) -> PortResult<String> {
             Ok(format!("process supervisor cancelled for {reason}"))
         }
     }

@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="420" viewBox="0 0 1180 420" role="img" aria-labelledby="title desc">
+  <title id="title">Blank project bootstrap and tracker-backed issue boundary</title>
+  <desc id="desc">Shows the provider-neutral blank project scaffold boundary and the separate tracker-backed issue lifecycle boundary.</desc>
+  <style>
+    .core { fill:#ecfdf5; stroke:#047857; stroke-width:1.5; rx:8; }
+    .sdk { fill:#f8fafc; stroke:#334155; stroke-width:1.5; rx:8; }
+    .tracker { fill:#fff7ed; stroke:#c2410c; stroke-width:1.5; rx:8; }
+    .guard { fill:#fefce8; stroke:#a16207; stroke-width:1.5; rx:8; }
+    .text { font-family:Arial, sans-serif; font-size:15px; fill:#0f172a; }
+    .small { font-family:Arial, sans-serif; font-size:12px; fill:#334155; }
+    .label { font-family:Arial, sans-serif; font-size:13px; font-weight:bold; fill:#0f172a; }
+    .arrow { stroke:#334155; stroke-width:1.6; fill:none; marker-end:url(#arrow); }
+    .dash { stroke:#64748b; stroke-width:1.3; stroke-dasharray:5 5; fill:none; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+  </defs>
+
+  <text x="42" y="34" class="label">Provider-neutral local bootstrap boundary</text>
+  <rect x="35" y="58" width="185" height="84" class="sdk"/>
+  <text x="55" y="90" class="text">empty checkout</text>
+  <text x="55" y="114" class="small">no source evidence</text>
+  <text x="55" y="130" class="small">optional declared stack</text>
+
+  <rect x="270" y="58" width="215" height="84" class="core"/>
+  <text x="290" y="90" class="text">BootstrapProject</text>
+  <text x="290" y="114" class="small">stack template policy</text>
+  <text x="290" y="130" class="small">no LLM, GitHub, install</text>
+
+  <rect x="535" y="58" width="215" height="84" class="core"/>
+  <text x="555" y="90" class="text">local scaffold files</text>
+  <text x="555" y="114" class="small">toolchain, tests, hooks</text>
+  <text x="555" y="130" class="small">printed start commands</text>
+
+  <rect x="800" y="58" width="230" height="84" class="sdk"/>
+  <text x="820" y="90" class="text">doctor / quality plan</text>
+  <text x="820" y="114" class="small">selected stack context</text>
+  <text x="820" y="130" class="small">local diagnostics</text>
+
+  <path d="M220 100 H270" class="arrow"/>
+  <path d="M485 100 H535" class="arrow"/>
+  <path d="M750 100 H800" class="arrow"/>
+
+  <text x="42" y="214" class="label">Tracker-backed issue boundary</text>
+  <rect x="35" y="238" width="185" height="84" class="guard"/>
+  <text x="55" y="270" class="text">tracker repo</text>
+  <text x="55" y="294" class="small">OWNER/REPO required</text>
+  <text x="55" y="310" class="small">token for GitHub adapter</text>
+
+  <rect x="270" y="238" width="215" height="84" class="sdk"/>
+  <text x="290" y="270" class="text">issue inventory</text>
+  <text x="290" y="294" class="small">read-only candidates</text>
+  <text x="290" y="310" class="small">dedupe context</text>
+
+  <rect x="535" y="238" width="215" height="84" class="sdk"/>
+  <text x="555" y="270" class="text">issue proposals</text>
+  <text x="555" y="294" class="small">local issue-set artifacts</text>
+  <text x="555" y="310" class="small">optional read-only Codex</text>
+
+  <rect x="800" y="238" width="230" height="84" class="tracker"/>
+  <text x="820" y="270" class="text">issue submit --yes</text>
+  <text x="820" y="294" class="small">review-gated tracker write</text>
+  <text x="820" y="310" class="small">default GitHub adapter</text>
+
+  <path d="M220 280 H270" class="arrow"/>
+  <path d="M485 280 H535" class="arrow"/>
+  <path d="M750 280 H800" class="arrow"/>
+
+  <path d="M915 142 V198 H128 V238" class="dash"/>
+  <text x="632" y="191" class="small">issue automation starts only after a concrete tracker repo is configured</text>
+</svg>

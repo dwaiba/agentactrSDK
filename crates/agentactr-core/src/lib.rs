@@ -44,11 +44,11 @@ pub use ports::{
     HumanIntervention, HumanInterventionMode, InterventionDecision, InterventionRequest, Issue,
     IssueCommentKind, IssueDraftPlanner, IssueId, IssueReleaseOutcome, IssueTracker,
     MemoryController, MemoryDecision, MemoryGroup, MemoryGroupId, MemoryGroupRequest, MemoryLease,
-    MemoryPolicy, MemoryPolicyRef, MemorySample, MergePlan, MergePlanRequest, PreCommitPlan,
-    PreCommitPlanRequest, PreCommitReport, PreCommitRunner, QualityGateSummary, ReleaseRequest,
-    ReleaseResult, RunOutcomeSummary, RuntimeApprovalPolicy, RuntimeProcessMonitor,
-    RuntimeProcessSupervisor, SortDirection, TechnologyStack, TraceEvent, TraceSink,
-    VcsCapabilities, VersionControl, WorkspaceDiff, WorktreeRef, WorktreeRequest,
+    MemoryPolicy, MemoryPolicyRef, MemorySample, MergePlan, MergePlanRequest, PortError,
+    PortResult, PreCommitPlan, PreCommitPlanRequest, PreCommitReport, PreCommitRunner,
+    QualityGateSummary, ReleaseRequest, ReleaseResult, RunOutcomeSummary, RuntimeApprovalPolicy,
+    RuntimeProcessMonitor, RuntimeProcessSupervisor, SortDirection, TechnologyStack, TraceEvent,
+    TraceSink, VcsCapabilities, VersionControl, WorkspaceDiff, WorktreeRef, WorktreeRequest,
 };
 pub use process::{
     AgentRunId, ContainerRef, ProcessGroupId, ProcessId, RunId, RuntimeIdentityRef, RuntimeKind,

@@ -2,7 +2,7 @@ use agentactr_core::{
     redaction_safe_issue_marker, FrameworkDeclaration, Issue, IssueCreateRequest,
     IssueDedupeStatus, IssueDraftPlanner, IssueDraftRequest, IssueDraftResult, IssueId,
     IssueLinkRequest, IssueProjectFieldValue, IssueProposal, IssueProposalId,
-    IssueSubmissionLedgerEntry, IssueSubmissionLedgerKey, IssueSubmissionLedgerState,
+    IssueSubmissionLedgerEntry, IssueSubmissionLedgerKey, IssueSubmissionLedgerState, PortResult,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -48,8 +48,8 @@ pub fn parent_issue_key(parent_issue: Option<u64>) -> String {
 pub struct DeterministicIssueDraftPlanner;
 
 impl IssueDraftPlanner for DeterministicIssueDraftPlanner {
-    fn draft(&self, req: IssueDraftRequest) -> Result<IssueDraftResult, String> {
-        draft_issue_proposals(req)
+    fn draft(&self, req: IssueDraftRequest) -> PortResult<IssueDraftResult> {
+        Ok(draft_issue_proposals(req)?)
     }
 }
 

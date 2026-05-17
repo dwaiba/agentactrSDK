@@ -11,12 +11,11 @@ pub(crate) use agentactr_codex::{
 use agentactr_codex::{CodexMemoryMonitor, CodexMemorySupervisor};
 use agentactr_sdk::{
     AdapterCapabilities, AdapterVersionReport, AgentactrConfig, CandidateQuery, ClaimRequest,
-    ClaimResult, CommentRef, CommentRequest, CommitRef, CommitRequest, GithubConfig, Issue,
-    IssueAppliedMetadata, IssueCommentKind, IssueCreateRequest, IssueCreateResult, IssueId,
-    IssueLinkRequest, IssueLinkResult, IssueProjectFieldValue, IssueRequestedMetadata,
-    IssueTracker, MemoryGroupId, MergePlan, MergePlanRequest, ReleaseRequest, ReleaseResult,
-    RuntimeProcessEvent, RuntimeProcessEventKind, TrackerConfig, VcsCapabilities, VcsConfig,
-    VersionControl, WorkspaceDiff, WorktreeRef, WorktreeRequest,
+    ClaimResult, CommentRef, CommentRequest, GithubConfig, Issue, IssueAppliedMetadata,
+    IssueCommentKind, IssueCreateRequest, IssueCreateResult, IssueId, IssueLinkRequest,
+    IssueLinkResult, IssueProjectFieldValue, IssueRequestedMetadata, IssueTracker, MemoryGroupId,
+    PortResult, ReleaseRequest, ReleaseResult, RuntimeProcessEvent, RuntimeProcessEventKind,
+    TrackerConfig,
 };
 use std::env;
 use std::fs;
@@ -206,28 +205,28 @@ impl CodexMemoryMonitor for CliCodexMemoryMonitor {
         self.0.failure()
     }
 
-    fn stop(self: Box<Self>) -> Result<(), String> {
+    fn stop(self: Box<Self>) -> PortResult<()> {
         let Self(monitor) = *self;
-        monitor.stop()
+        Ok(monitor.stop()?)
     }
 }
 
 impl CodexMemorySupervisor for CliCodexMemorySupervisor {
-    fn observe(&self, event: &RuntimeProcessEvent) -> Result<(), String> {
-        persist_runtime_process_event(
+    fn observe(&self, event: &RuntimeProcessEvent) -> PortResult<()> {
+        Ok(persist_runtime_process_event(
             &self.artifact_dir,
             &self.trace_path,
             &self.repo,
             &self.issue,
             event,
-        )
+        )?)
     }
 
     fn start(
         &self,
         event: &RuntimeProcessEvent,
         artifact_dir: &Path,
-    ) -> Result<Option<Box<dyn CodexMemoryMonitor>>, String> {
+    ) -> PortResult<Option<Box<dyn CodexMemoryMonitor>>> {
         let root_pid = event
             .attribution
             .root_pid
@@ -256,7 +255,7 @@ impl CodexMemorySupervisor for CliCodexMemorySupervisor {
                 0
             },
         };
-        start_memory_monitor(
+        Ok(start_memory_monitor(
             cgroup,
             root_pid,
             artifact_dir,
@@ -273,7 +272,7 @@ impl CodexMemorySupervisor for CliCodexMemorySupervisor {
             monitor.map(|monitor| {
                 Box::new(CliCodexMemoryMonitor(monitor)) as Box<dyn CodexMemoryMonitor>
             })
-        })
+        })?)
     }
 
     fn preserve_debug_bundle(
@@ -281,7 +280,7 @@ impl CodexMemorySupervisor for CliCodexMemorySupervisor {
         event: Option<&RuntimeProcessEvent>,
         artifact_dir: &Path,
         reason: &str,
-    ) -> Result<(), String> {
+    ) -> PortResult<()> {
         let root_pid = event
             .and_then(|event| event.attribution.root_pid)
             .map(|pid| pid.0);
@@ -289,14 +288,10 @@ impl CodexMemorySupervisor for CliCodexMemorySupervisor {
             .and_then(|event| event.attribution.memory_group_id.as_ref())
             .and_then(|group_id| self.memory_groups.get(group_id))
             .map(PathBuf::as_path);
-        preserve_memory_debug_bundle(artifact_dir, cgroup, root_pid, reason).map(|_| ())
+        Ok(preserve_memory_debug_bundle(artifact_dir, cgroup, root_pid, reason).map(|_| ())?)
     }
 
-    fn cancel_process_tree(
-        &self,
-        event: &RuntimeProcessEvent,
-        reason: &str,
-    ) -> Result<String, String> {
+    fn cancel_process_tree(&self, event: &RuntimeProcessEvent, reason: &str) -> PortResult<String> {
         let root_pid = event
             .attribution
             .root_pid
@@ -328,7 +323,8 @@ impl CodexMemorySupervisor for CliCodexMemorySupervisor {
         }
         Err(format!(
             "runtime process group {signal_target} did not exit after SIGTERM/SIGKILL for {reason}"
-        ))
+        )
+        .into())
     }
 }
 
@@ -482,334 +478,6 @@ fn runtime_process_kind(kind: RuntimeProcessEventKind) -> &'static str {
 
 fn runtime_process_span_id(run_id: &str, agent_run_id: &str) -> String {
     format!("span:{run_id}:{agent_run_id}:runtime.process")
-}
-
-pub(crate) struct LocalGitAdapter;
-
-impl LocalGitAdapter {
-    pub(crate) fn prepare_worktree(
-        &self,
-        run_id: &str,
-        repo: &str,
-        issue: &str,
-        config: &VcsConfig,
-    ) -> Result<PathBuf, String> {
-        self.prepare_worktree_ref(WorktreeRequest {
-            run_id: run_id.to_string(),
-            repo: repo.to_string(),
-            issue: issue.to_string(),
-            base_ref: config.base_ref.clone(),
-            worktree_root: PathBuf::from(&config.worktree_root),
-            branch_template: config.branch_template.clone(),
-            fail_on_dirty_source_checkout: config.fail_on_dirty_source_checkout,
-            copy_runtime_config_to_worktree: config.copy_runtime_config_to_worktree,
-        })
-        .map(|worktree| worktree.path)
-    }
-
-    pub(crate) fn preflight_source_checkout(&self, config: &VcsConfig) -> Result<(), String> {
-        resolve_base_commit(&config.base_ref)?;
-        if config.fail_on_dirty_source_checkout {
-            ensure_clean_git_checkout()?;
-        }
-        Ok(())
-    }
-
-    fn prepare_worktree_ref(&self, req: WorktreeRequest) -> Result<WorktreeRef, String> {
-        let base_ref = req.base_ref.clone();
-        let base_commit = resolve_base_commit(&req.base_ref)?;
-        let source_checkout_clean_at_prepare =
-            git_output(&["status", "--porcelain"])?.trim().is_empty();
-        if req.fail_on_dirty_source_checkout {
-            ensure_clean_git_checkout()?;
-        }
-        create_dir(&req.worktree_root)?;
-        let worktree = req.worktree_root.join(&req.run_id);
-        if worktree.exists() {
-            return Err(format!("worktree already exists: {}", worktree.display()));
-        }
-        let branch_name =
-            render_branch_template(&req.branch_template, &req.repo, &req.issue, &req.run_id);
-        let status = Command::new("git")
-            .arg("worktree")
-            .arg("add")
-            .arg("-b")
-            .arg(&branch_name)
-            .arg(&worktree)
-            .arg(base_commit.trim())
-            .status()
-            .map_err(|e| format!("git worktree add: {e}"))?;
-        if !status.success() {
-            return Err(format!("git worktree add exited with {status}"));
-        }
-        let overlaid_runtime_config = if req.copy_runtime_config_to_worktree {
-            copy_runtime_config_to_worktree(&worktree)?
-        } else {
-            Vec::new()
-        };
-        let git_version = git_output(&["--version"]).unwrap_or_else(|_| "unknown".to_string());
-        let overlay_metadata = if overlaid_runtime_config.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "runtime_config_overlay = [{}]\n",
-                overlaid_runtime_config
-                    .iter()
-                    .map(|item| format!("\"{}\"", toml_escape(item)))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-        let metadata = format!(
-            "run_id = \"{}\"\nbase_ref = \"{}\"\nbase_commit = \"{}\"\nworktree_path = \"{}\"\nbranch_name = \"{}\"\ngit_version = \"{}\"\nsource_checkout_clean_at_prepare = {}\n{}",
-            toml_escape(&req.run_id),
-            toml_escape(base_ref.trim()),
-            base_commit.trim(),
-            toml_escape(&worktree.display().to_string()),
-            toml_escape(&branch_name),
-            toml_escape(git_version.trim()),
-            source_checkout_clean_at_prepare,
-            overlay_metadata
-        );
-        write_file(worktree.join(".agentactr-run.toml"), &metadata)?;
-        Ok(WorktreeRef {
-            path: fs::canonicalize(&worktree).unwrap_or(worktree),
-            base_commit: base_commit.trim().to_string(),
-            run_id: req.run_id,
-        })
-    }
-}
-
-fn copy_runtime_config_to_worktree(worktree: &Path) -> Result<Vec<String>, String> {
-    const RUNTIME_CONFIG_FILES: &[&str] = &["agentactr.toml", ".codex/config.toml", "WORKFLOW.md"];
-
-    let mut copied = Vec::new();
-    for relative in RUNTIME_CONFIG_FILES {
-        let source = Path::new(relative);
-        if !source.exists() {
-            continue;
-        }
-        if !source.is_file() {
-            return Err(format!(
-                "runtime config overlay source {} is not a file",
-                source.display()
-            ));
-        }
-        let target = worktree.join(relative);
-        if let Some(parent) = target.parent() {
-            create_dir(parent)?;
-        }
-        fs::copy(source, &target).map_err(|e| {
-            format!(
-                "copy runtime config {} to {}: {e}",
-                source.display(),
-                target.display()
-            )
-        })?;
-        copied.push((*relative).to_string());
-    }
-    Ok(copied)
-}
-
-impl VersionControl for LocalGitAdapter {
-    fn version_report(&self) -> AdapterVersionReport {
-        AdapterVersionReport {
-            adapter_kind: "version_control".to_string(),
-            adapter_name: "agentactr-cli-local-git".to_string(),
-            adapter_version: env!("CARGO_PKG_VERSION").to_string(),
-            product_name: "git".to_string(),
-            product_version: git_output(&["--version"]).unwrap_or_else(|_| "unknown".to_string()),
-            api_version: "git-cli".to_string(),
-            capability_digest: "detect,status,worktree-add-detach,diff,merge-plan-read-only"
-                .to_string(),
-            degraded_features: vec!["commit".to_string()],
-            required_actions: vec![
-                "keep commit and merge behind SDK use cases before enabling finalization"
-                    .to_string(),
-            ],
-            warnings: Vec::new(),
-        }
-    }
-
-    fn capabilities(&self) -> AdapterCapabilities {
-        AdapterCapabilities {
-            adapter_kind: "version_control".to_string(),
-            supported_features: vec![
-                "source_checkout_preflight".to_string(),
-                "isolated_git_worktree".to_string(),
-                "base_commit_recording".to_string(),
-                "runtime_config_overlay".to_string(),
-                "workspace_diff_artifact".to_string(),
-                "merge_plan_read_only".to_string(),
-            ],
-            degraded_features: vec![
-                "commit".to_string(),
-                "cross_issue_overlap_detection".to_string(),
-            ],
-            required_actions: vec![
-                "keep commit and merge behind SDK use cases before enabling finalization"
-                    .to_string(),
-            ],
-        }
-    }
-
-    fn detect(&self, _root: &Path) -> Result<VcsCapabilities, String> {
-        git_output(&["status", "--porcelain"])?;
-        Ok(VcsCapabilities)
-    }
-
-    fn prepare_workspace(&self, req: WorktreeRequest) -> Result<WorktreeRef, String> {
-        if req.run_id.trim().is_empty() {
-            return Err("worktree request requires run_id".to_string());
-        }
-        self.prepare_worktree_ref(req)
-    }
-
-    fn diff(&self, worktree: &WorktreeRef) -> Result<WorkspaceDiff, String> {
-        if worktree.run_id.trim().is_empty() {
-            return Err("workspace diff requires run_id".to_string());
-        }
-        if !worktree.path.is_dir() {
-            return Err(format!(
-                "workspace diff worktree is missing or not a directory: {}",
-                worktree.path.display()
-            ));
-        }
-        let current_commit = git_output_in_worktree(&worktree.path, &["rev-parse", "HEAD"])?;
-        let mut patch = git_output_in_worktree_raw(
-            &worktree.path,
-            &["diff", "--binary", &worktree.base_commit, "--"],
-        )?;
-        let status = git_output_in_worktree(&worktree.path, &["status", "--porcelain"])?;
-        let touched_files = parse_git_status_paths(&status);
-        let untracked_files = git_output_in_worktree(
-            &worktree.path,
-            &["ls-files", "--others", "--exclude-standard"],
-        )?
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-        for untracked in &untracked_files {
-            if !patch.is_empty() && !patch.ends_with('\n') {
-                patch.push('\n');
-            }
-            patch.push_str(&git_new_file_patch(&worktree.path, untracked)?);
-        }
-        Ok(WorkspaceDiff {
-            run_id: worktree.run_id.clone(),
-            worktree: worktree.path.clone(),
-            base_commit: worktree.base_commit.clone(),
-            current_commit,
-            patch,
-            is_empty: touched_files.is_empty(),
-            touched_files,
-            untracked_files,
-        })
-    }
-
-    fn commit(&self, _req: CommitRequest) -> Result<CommitRef, String> {
-        Err("commit is not implemented in this milestone".to_string())
-    }
-
-    fn merge_plan(&self, req: MergePlanRequest) -> Result<MergePlan, String> {
-        if req.worktree.run_id.trim().is_empty() {
-            return Err("merge plan requires run_id".to_string());
-        }
-        if !req.worktree.path.is_dir() {
-            return Err(format!(
-                "merge plan worktree is missing or not a directory: {}",
-                req.worktree.path.display()
-            ));
-        }
-        let current_commit = git_output_in_worktree(&req.worktree.path, &["rev-parse", "HEAD"])?;
-        let base_rev = format!("{}^{{commit}}", req.base_ref);
-        let base_ref_current_commit =
-            git_output_in_worktree(&req.worktree.path, &["rev-parse", "--verify", &base_rev])?;
-        let base_ref_drifted = base_ref_current_commit.trim() != req.worktree.base_commit.trim();
-        let head_contains_base_ref = git_status_in_worktree(
-            &req.worktree.path,
-            &[
-                "merge-base",
-                "--is-ancestor",
-                &base_ref_current_commit,
-                &current_commit,
-            ],
-        )?;
-        let status = git_output_in_worktree(&req.worktree.path, &["status", "--porcelain"])?;
-        let touched_files = parse_git_status_paths(&status);
-        let merge_enabled = req.merge_mode != "disabled";
-        let workspace_diff_exists = req
-            .workspace_diff_artifact
-            .as_ref()
-            .map(|path| path.is_file())
-            .unwrap_or(false);
-        let mut blockers = Vec::new();
-        if !merge_enabled {
-            blockers.push("merge.mode is disabled".to_string());
-        }
-        if base_ref_drifted {
-            blockers.push(format!(
-                "base ref {} advanced from {} to {}",
-                req.base_ref, req.worktree.base_commit, base_ref_current_commit
-            ));
-        }
-        if !head_contains_base_ref {
-            blockers.push(format!(
-                "worktree HEAD {} does not contain current base ref {}",
-                current_commit, base_ref_current_commit
-            ));
-        }
-        if !workspace_diff_exists {
-            blockers.push("workspace diff artifact is missing".to_string());
-        }
-        let warnings = vec![
-            "cross-issue overlap detection is not implemented in this milestone".to_string(),
-            "commit and GitHub finalization remain disabled unless implemented separately"
-                .to_string(),
-        ];
-        let recommendation = if blockers.is_empty() {
-            "merge_candidate"
-        } else {
-            "do_not_merge"
-        }
-        .to_string();
-        Ok(MergePlan {
-            run_id: req.worktree.run_id,
-            worktree: req.worktree.path,
-            base_ref: req.base_ref,
-            base_commit: req.worktree.base_commit,
-            current_commit,
-            base_ref_current_commit,
-            base_ref_drifted,
-            head_contains_base_ref,
-            merge_mode: req.merge_mode,
-            merge_enabled,
-            workspace_diff_artifact: req.workspace_diff_artifact,
-            workspace_diff_exists,
-            touched_files,
-            blockers,
-            warnings,
-            recommendation,
-        })
-    }
-}
-
-fn render_branch_template(template: &str, repo: &str, issue: &str, run_id: &str) -> String {
-    let repo_slug = repo
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
-    template
-        .replace("{repo_slug}", &repo_slug)
-        .replace("{issue_number}", issue)
-        .replace("{run_id}", run_id)
 }
 
 pub(crate) struct GithubRestAdapter {
@@ -1687,41 +1355,42 @@ impl IssueTracker for GithubRestAdapter {
         self.capabilities_for_config()
     }
 
-    fn fetch_candidates(&self, _q: CandidateQuery) -> Result<Vec<Issue>, String> {
-        self.fetch_issue_candidates(_q)
+    fn fetch_candidates(&self, _q: CandidateQuery) -> PortResult<Vec<Issue>> {
+        Ok(self.fetch_issue_candidates(_q)?)
     }
 
-    fn fetch_by_ids(&self, ids: &[IssueId]) -> Result<Vec<Issue>, String> {
+    fn fetch_by_ids(&self, ids: &[IssueId]) -> PortResult<Vec<Issue>> {
         let mut issues = Vec::new();
         for id in ids {
             let Some((repo, issue)) = id.0.rsplit_once('#') else {
-                return Err(format!("issue id must use OWNER/REPO#NUMBER: {}", id.0));
+                return Err(format!("issue id must use OWNER/REPO#NUMBER: {}", id.0).into());
             };
             issues.push(self.fetch_issue(repo, issue)?);
         }
         Ok(issues)
     }
 
-    fn claim(&self, req: ClaimRequest) -> Result<ClaimResult, String> {
+    fn claim(&self, req: ClaimRequest) -> PortResult<ClaimResult> {
         let issue = self.fetch_issue(&req.repo, &req.issue_number.to_string())?;
         if issue.is_pull_request && !req.allow_pull_request {
             return Err(
                 "GitHub lifecycle mutation rejects pull-request shaped issue records by default"
-                    .to_string(),
+                    .into(),
             );
         }
         if issue.state != "open" {
             return Err(format!(
                 "GitHub lifecycle claim requires open issue; found state={}",
                 issue.state
-            ));
+            )
+            .into());
         }
         if issue
             .labels
             .iter()
             .any(|label| req.ignore_labels.iter().any(|ignore| ignore == label))
         {
-            return Err("GitHub lifecycle claim rejected ignored issue".to_string());
+            return Err("GitHub lifecycle claim rejected ignored issue".into());
         }
         let claim_comments = self.list_issue_comments(&req.repo, req.issue_number)?;
         let mut previous_lease = None;
@@ -1811,7 +1480,7 @@ impl IssueTracker for GithubRestAdapter {
         })
     }
 
-    fn release(&self, req: ReleaseRequest) -> Result<ReleaseResult, String> {
+    fn release(&self, req: ReleaseRequest) -> PortResult<ReleaseResult> {
         let mut comment_refs = Vec::new();
         if let Some(comment) = req.final_comment.as_ref() {
             comment_refs.push(self.comment(comment.clone())?);
@@ -1865,7 +1534,8 @@ impl IssueTracker for GithubRestAdapter {
             return Err(format!(
                 "GitHub release verification failed: {}",
                 mismatch_details.join("; ")
-            ));
+            )
+            .into());
         }
         Ok(ReleaseResult {
             applied_labels: mutation.labels,
@@ -1882,26 +1552,26 @@ impl IssueTracker for GithubRestAdapter {
         })
     }
 
-    fn comment(&self, req: CommentRequest) -> Result<CommentRef, String> {
+    fn comment(&self, req: CommentRequest) -> PortResult<CommentRef> {
         let marker = github_lifecycle_comment_marker(&req);
         let marker_identity = github_lifecycle_comment_marker_identity(&req);
         let body = format!("{}\n\n{}", req.body.trim_end(), marker);
-        self.upsert_lifecycle_comment(
+        Ok(self.upsert_lifecycle_comment(
             &req.repo,
             req.issue_number,
             req.kind,
             &marker_identity,
             &body,
             req.update_existing,
-        )
+        )?)
     }
 
-    fn create_issue(&self, req: IssueCreateRequest) -> Result<IssueCreateResult, String> {
+    fn create_issue(&self, req: IssueCreateRequest) -> PortResult<IssueCreateResult> {
         validate_github_repo(&req.proposal.repo)?;
         if !req.proposal.issue_field_values.is_empty() {
             return Err(
                 "GitHub issue_field_values are not supported by the REST create issue endpoint; use project_fields or remove unsupported issue field values before submission"
-                    .to_string(),
+                    .into(),
             );
         }
         let token = github_token_from_env(&self.token_env)?;
@@ -1968,7 +1638,7 @@ impl IssueTracker for GithubRestAdapter {
         ))
     }
 
-    fn link_issue(&self, req: IssueLinkRequest) -> Result<IssueLinkResult, String> {
+    fn link_issue(&self, req: IssueLinkRequest) -> PortResult<IssueLinkResult> {
         let token = github_token_from_env(&self.token_env)?;
         validate_github_repo(&req.repo)?;
         let url = format!(
@@ -3182,162 +2852,11 @@ fn valid_github_segment(value: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
-fn toml_escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-fn ensure_clean_git_checkout() -> Result<(), String> {
-    let output = git_output(&["status", "--porcelain"])?;
-    if output.trim().is_empty() {
-        Ok(())
-    } else {
-        Err(
-            "source checkout is dirty; commit/stash changes before creating an issue worktree"
-                .to_string(),
-        )
-    }
-}
-
-fn resolve_base_commit(base_ref: &str) -> Result<String, String> {
-    let rev = format!("{base_ref}^{{commit}}");
-    git_output(&["rev-parse", "--verify", &rev])
-        .map_err(|e| format!("resolve vcs.base_ref `{base_ref}` to an immutable commit: {e}"))
-}
-
-fn git_output(args: &[&str]) -> Result<String, String> {
-    command_output("git", args)
-}
-
-fn git_output_in_worktree(worktree: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git -C {} {}: {e}", worktree.display(), args.join(" ")))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        Err(format!(
-            "git -C {} {} failed: {}",
-            worktree.display(),
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
-    }
-}
-
-fn git_output_in_worktree_raw(worktree: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git -C {} {}: {e}", worktree.display(), args.join(" ")))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(format!(
-            "git -C {} {} failed: {}",
-            worktree.display(),
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
-    }
-}
-
-fn git_new_file_patch(worktree: &Path, repo_relative_path: &str) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(["diff", "--binary", "--no-index", "--", "/dev/null"])
-        .arg(repo_relative_path)
-        .output()
-        .map_err(|e| {
-            format!(
-                "git -C {} diff --binary --no-index -- /dev/null {}: {e}",
-                worktree.display(),
-                repo_relative_path
-            )
-        })?;
-    let code = output.status.code().unwrap_or_default();
-    if output.status.success() || code == 1 {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(format!(
-            "git -C {} diff --binary --no-index -- /dev/null {} failed: {}",
-            worktree.display(),
-            repo_relative_path,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
-    }
-}
-
-fn git_status_in_worktree(worktree: &Path, args: &[&str]) -> Result<bool, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(args)
-        .output()
-        .map_err(|e| format!("git -C {} {}: {e}", worktree.display(), args.join(" ")))?;
-    if output.status.success() {
-        Ok(true)
-    } else if output.status.code() == Some(1) {
-        Ok(false)
-    } else {
-        Err(format!(
-            "git -C {} {} failed: {}",
-            worktree.display(),
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
-    }
-}
-
-fn parse_git_status_paths(status: &str) -> Vec<String> {
-    status
-        .lines()
-        .filter_map(|line| {
-            if line.len() < 3 {
-                return None;
-            }
-            let path = if line.as_bytes().get(2) == Some(&b' ') {
-                line[3..].trim()
-            } else {
-                line.get(2..).unwrap_or(line).trim_start()
-            };
-            let normalized = path
-                .rsplit_once(" -> ")
-                .map(|(_, new_path)| new_path)
-                .unwrap_or(path);
-            if normalized == ".agentactr-run.toml" {
-                None
-            } else {
-                Some(normalized.to_string())
-            }
-        })
-        .collect()
-}
-
-fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(program)
-        .args(args)
-        .output()
-        .map_err(|e| format!("{program} {}: {e}", args.join(" ")))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        Err(format!(
-            "{program} {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vcs_adapter::{render_branch_template, LocalGitAdapter};
+    use agentactr_sdk::WorktreeRequest;
     use reqwest::header::{HeaderMap, HeaderValue};
     use std::ffi::OsString;
     use std::sync::Mutex;
@@ -3478,6 +2997,7 @@ mod tests {
 
         let err = adapter.create_issue(req).unwrap_err();
 
+        let err = err.to_string();
         assert!(err.contains("issue_field_values are not supported"));
         assert!(!err.contains("missing GitHub token"));
     }

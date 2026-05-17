@@ -22,6 +22,10 @@ Use this checklist before announcing `agentactrSDK` publicly.
 - Release workflow is run only from trusted tag push or trusted manual dispatch.
 - Depot repository/action variable `DEPOT_PROJECT_ID` is configured with the Depot project ID for trusted Docker builds.
 - Depot action secret `DEPOT_TOKEN` is configured with a project-scoped Depot token.
+- Native CLI binary and macOS `.pkg` release assets are intentionally disabled until the signing, notarization, provenance, and install verification path is re-enabled as a separate release slice.
+- If native macOS distribution is re-enabled later, the self-hosted Apple Silicon macOS runner must have Xcode command-line tools available for `codesign`, `notarytool`, `pkgbuild`, `productsign`, `stapler`, and `spctl`.
+- If native macOS distribution is re-enabled later, macOS release signing must use either an imported Developer ID certificate bundle through `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, and `MACOS_KEYCHAIN_PASSWORD`, or preinstalled Developer ID Application and Developer ID Installer identities available to the runner keychain.
+- If native macOS distribution is re-enabled later, macOS notary credentials must be configured through `MACOS_NOTARY_APPLE_ID`, `MACOS_NOTARY_PASSWORD`, and `MACOS_NOTARY_TEAM_ID`, or an existing notarytool keychain profile must be present on the runner.
 - Spending or budget controls are set at the account or organization level.
 
 ## Runner Cost Controls
@@ -33,6 +37,7 @@ Use this checklist before announcing `agentactrSDK` publicly.
 - Scheduled `nightly` and `security` cron triggers are currently commented out; run `nightly` manually with `workflow_dispatch` when needed.
 - All workflow jobs have `timeout-minutes`.
 - PR workflows use `concurrency` with `cancel-in-progress: true`.
+- External GitHub Actions are pinned to full 40-character commit SHAs; version tags are comments only, and `scripts/check-github-workflow-gates.sh` rejects mutable tags, branches, missing refs, and short SHAs [4].
 - Workflow changes require maintainer review before workflow approval.
 - Trusted `nightly` and `release` image builds use Depot, while Depot credentials stay out of untrusted PR and merge-queue workflows.
 
@@ -58,7 +63,7 @@ target/release/agentactr commands --json
 
 ## Release Decision
 
-Do not tag a release until the exact release commit is green on remote required checks. The release workflow publishes binaries and Depot-built images only after a trusted `v*.*.*` tag push or trusted manual dispatch.
+Do not tag a release until the exact release commit is green on remote required checks. The current release workflow publishes Depot-built runtime/static image metadata after a trusted `v*.*.*` tag push or trusted manual dispatch; native CLI binary archives and macOS `.pkg` assets are not attached. Operators should build the CLI locally with `cargo build --release --bin agentactr`. If native binary release distribution is re-enabled later, the Apple Silicon macOS path must fail closed unless the CLI binary is Developer-ID signed, notarized, Gatekeeper-assessed, and accompanied by a signed, notarized, and stapled `.pkg` installer [7].
 
 ## References
 
@@ -68,8 +73,10 @@ Do not tag a release until the exact release commit is green on remote required 
 
 [3] GitHub, "Billing and usage," GitHub Docs. [Online]. Available: https://docs.github.com/actions/reference/usage-limits-billing-and-administration. [Accessed: May 15, 2026].
 
-[4] GitHub, "Security hardening for GitHub Actions," GitHub Docs. [Online]. Available: https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions. [Accessed: May 15, 2026].
+[4] GitHub, "Secure use reference," GitHub Docs. [Online]. Available: https://docs.github.com/en/actions/reference/security/secure-use. [Accessed: May 17, 2026].
 
 [5] Depot, "Container builds in GitHub Actions," Depot Documentation. [Online]. Available: https://depot.dev/docs/container-builds/integrations/github-actions. [Accessed: May 16, 2026].
 
 [6] Docker, "Validating build configuration with GitHub Actions," Docker Docs. [Online]. Available: https://docs.docker.com/build/ci/github-actions/checks/. [Accessed: May 16, 2026].
+
+[7] Apple, "Notarizing macOS software before distribution," Apple Developer Documentation. [Online]. Available: https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution. [Accessed: May 16, 2026].

@@ -85,7 +85,7 @@ pub trait AgentActrUseCases {
 
 impl AgentActrUseCases for AgentActr {
     fn prepare_workspace(&self, req: WorktreeRequest) -> Result<WorktreeRef, String> {
-        self.vcs.prepare_workspace(req)
+        Ok(self.vcs.prepare_workspace(req)?)
     }
 
     fn plan_default_spawn(&self, req: DefaultSpawnPlanRequest<'_>) -> SpawnPlan {
@@ -93,7 +93,7 @@ impl AgentActrUseCases for AgentActr {
     }
 
     fn claim_issue(&self, req: ClaimRequest) -> Result<ClaimResult, String> {
-        self.issue_tracker.claim(req)
+        Ok(self.issue_tracker.claim(req)?)
     }
 
     fn apply_issue_lifecycle(
@@ -113,7 +113,7 @@ impl AgentActrUseCases for AgentActr {
         hooks: &mut dyn RunIssueHooks,
     ) -> Result<RunIssueReport, String> {
         let worktree = run_phase(hooks, "worktree", || {
-            self.vcs.prepare_workspace(req.worktree.clone())
+            Ok(self.vcs.prepare_workspace(req.worktree.clone())?)
         })?;
         let issue_context = run_phase(hooks, "github_fetch", || {
             let issues = self
@@ -732,7 +732,7 @@ mod tests {
         AdapterCapabilities, AgentRuntimeCapabilities, AgentSession, AgentStartRequest,
         AgentTurnRequest, AgentTurnStream, CancelReason, CandidateQuery, ClaimRequest, ClaimResult,
         CommentRef, CommentRequest, CommitRef, CommitRequest, MergePlan, MergePlanRequest,
-        ReleaseRequest, ReleaseResult, VcsCapabilities, WorkspaceDiff,
+        PortResult, ReleaseRequest, ReleaseResult, VcsCapabilities, WorkspaceDiff,
     };
     use std::fs;
     use std::path::Path;
@@ -760,11 +760,11 @@ mod tests {
             AdapterCapabilities::unknown("vcs")
         }
 
-        fn detect(&self, _root: &Path) -> Result<VcsCapabilities, String> {
+        fn detect(&self, _root: &Path) -> PortResult<VcsCapabilities> {
             Ok(VcsCapabilities)
         }
 
-        fn prepare_workspace(&self, req: WorktreeRequest) -> Result<WorktreeRef, String> {
+        fn prepare_workspace(&self, req: WorktreeRequest) -> PortResult<WorktreeRef> {
             self.calls.push("worktree");
             Ok(WorktreeRef {
                 path: req.worktree_root.join(&req.run_id),
@@ -773,15 +773,15 @@ mod tests {
             })
         }
 
-        fn diff(&self, _worktree: &WorktreeRef) -> Result<WorkspaceDiff, String> {
+        fn diff(&self, _worktree: &WorktreeRef) -> PortResult<WorkspaceDiff> {
             Ok(WorkspaceDiff::default())
         }
 
-        fn commit(&self, _req: CommitRequest) -> Result<CommitRef, String> {
+        fn commit(&self, _req: CommitRequest) -> PortResult<CommitRef> {
             Ok(CommitRef)
         }
 
-        fn merge_plan(&self, _req: MergePlanRequest) -> Result<MergePlan, String> {
+        fn merge_plan(&self, _req: MergePlanRequest) -> PortResult<MergePlan> {
             Ok(MergePlan::default())
         }
     }
@@ -795,11 +795,11 @@ mod tests {
             AdapterCapabilities::unknown("tracker")
         }
 
-        fn fetch_candidates(&self, _q: CandidateQuery) -> Result<Vec<Issue>, String> {
+        fn fetch_candidates(&self, _q: CandidateQuery) -> PortResult<Vec<Issue>> {
             Ok(Vec::new())
         }
 
-        fn fetch_by_ids(&self, _ids: &[IssueId]) -> Result<Vec<Issue>, String> {
+        fn fetch_by_ids(&self, _ids: &[IssueId]) -> PortResult<Vec<Issue>> {
             self.calls.push("github_fetch");
             Ok(vec![Issue {
                 id: "OWNER/REPO#42".to_string(),
@@ -810,15 +810,15 @@ mod tests {
             }])
         }
 
-        fn claim(&self, _req: ClaimRequest) -> Result<ClaimResult, String> {
+        fn claim(&self, _req: ClaimRequest) -> PortResult<ClaimResult> {
             Ok(ClaimResult::default())
         }
 
-        fn release(&self, _req: ReleaseRequest) -> Result<ReleaseResult, String> {
+        fn release(&self, _req: ReleaseRequest) -> PortResult<ReleaseResult> {
             Ok(ReleaseResult::default())
         }
 
-        fn comment(&self, _req: CommentRequest) -> Result<CommentRef, String> {
+        fn comment(&self, _req: CommentRequest) -> PortResult<CommentRef> {
             Ok(CommentRef::default())
         }
     }
@@ -839,19 +839,19 @@ mod tests {
             AdapterCapabilities::unknown("tracker")
         }
 
-        fn fetch_candidates(&self, _q: CandidateQuery) -> Result<Vec<Issue>, String> {
+        fn fetch_candidates(&self, _q: CandidateQuery) -> PortResult<Vec<Issue>> {
             Ok(Vec::new())
         }
 
-        fn fetch_by_ids(&self, _ids: &[IssueId]) -> Result<Vec<Issue>, String> {
+        fn fetch_by_ids(&self, _ids: &[IssueId]) -> PortResult<Vec<Issue>> {
             Ok(Vec::new())
         }
 
-        fn claim(&self, _req: ClaimRequest) -> Result<ClaimResult, String> {
+        fn claim(&self, _req: ClaimRequest) -> PortResult<ClaimResult> {
             Ok(ClaimResult::default())
         }
 
-        fn release(&self, req: ReleaseRequest) -> Result<ReleaseResult, String> {
+        fn release(&self, req: ReleaseRequest) -> PortResult<ReleaseResult> {
             self.releases.lock().unwrap().push(req.clone());
             Ok(ReleaseResult {
                 applied_labels: req.add_labels,
@@ -869,7 +869,7 @@ mod tests {
             })
         }
 
-        fn comment(&self, _req: CommentRequest) -> Result<CommentRef, String> {
+        fn comment(&self, _req: CommentRequest) -> PortResult<CommentRef> {
             Ok(CommentRef::default())
         }
     }
@@ -886,20 +886,20 @@ mod tests {
             }
         }
 
-        fn start(&self, _req: AgentStartRequest) -> Result<AgentSession, String> {
+        fn start(&self, _req: AgentStartRequest) -> PortResult<AgentSession> {
             Ok(AgentSession)
         }
 
-        fn run_turn(&self, _req: AgentTurnRequest) -> Result<AgentTurnStream, String> {
+        fn run_turn(&self, _req: AgentTurnRequest) -> PortResult<AgentTurnStream> {
             Ok(AgentTurnStream)
         }
 
-        fn run_issue(&self, _req: AgentIssueRunRequest) -> Result<AgentRunReport, String> {
+        fn run_issue(&self, _req: AgentIssueRunRequest) -> PortResult<AgentRunReport> {
             self.calls.push("codex_exec");
             Ok(AgentRunReport::default())
         }
 
-        fn cancel(&self, _session_id: &str, _reason: CancelReason) -> Result<(), String> {
+        fn cancel(&self, _session_id: &str, _reason: CancelReason) -> PortResult<()> {
             Ok(())
         }
     }

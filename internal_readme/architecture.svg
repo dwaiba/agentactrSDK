@@ -46,10 +46,10 @@
 
   <rect x="640" y="250" width="230" height="122" class="cli"/>
   <text x="662" y="282" class="text">agentactr CLI</text>
-  <text x="662" y="308" class="small">command surface and docs</text>
-  <text x="662" y="324" class="small">config-driven composition</text>
-  <text x="662" y="340" class="small">Codex/GitHub/default wiring</text>
-  <text x="662" y="356" class="small">doctor, templates, gates</text>
+  <text x="662" y="308" class="small">focused command modules</text>
+  <text x="662" y="324" class="small">setup, issue, quality, VCS</text>
+  <text x="662" y="340" class="small">docs, MCP, trace, debug</text>
+  <text x="662" y="356" class="small">config-driven composition</text>
 
   <rect x="330" y="250" width="250" height="122" class="adapter"/>
   <text x="352" y="282" class="text">CLI-local adapters</text>

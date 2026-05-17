@@ -23,9 +23,9 @@
 
   <rect x="45" y="70" width="235" height="150" class="box cli"/>
   <text x="68" y="100" class="title">agentactr CLI</text>
-  <text x="68" y="128" class="txt">clap commands and banners</text>
-  <text x="68" y="152" class="txt">config scaffolding and doctor</text>
-  <text x="68" y="176" class="txt">default Codex and GitHub wiring</text>
+  <text x="68" y="128" class="txt">focused command modules</text>
+  <text x="68" y="152" class="txt">setup, issue, quality modules</text>
+  <text x="68" y="176" class="txt">MCP, trace, debug HCI modules</text>
   <text x="68" y="200" class="small">may call SDK APIs only</text>
 
   <rect x="45" y="270" width="235" height="125" class="box adapter"/>
