@@ -3,6 +3,11 @@ use agentactr_core::{AgentactrConfig, CodexAuthMode, DomainProfile, DomainQualit
 use crate::discovery::RepoInspection;
 use crate::domains::domain_matches_selection;
 
+const GENERATED_AGENTS_MARKER: &str = "<!-- agentactr:generated-agents v1 -->";
+const GENERATED_PROJECT_SPEC_MARKER: &str = "<!-- agentactr:generated-project-spec v1 -->";
+const PROJECT_SPEC_CONTEXT_START: &str = "<!-- agentactr:project-context:start -->";
+const PROJECT_SPEC_CONTEXT_END: &str = "<!-- agentactr:project-context:end -->";
+
 #[derive(Clone, Debug, Default)]
 pub struct DetectedCredentials {
     pub github_token: bool,
@@ -52,6 +57,152 @@ fn select_github_bearer_token_env_var(
 fn arr(values: &[String]) -> String {
     let rendered = values.iter().map(|v| q(v)).collect::<Vec<_>>().join(", ");
     format!("[{rendered}]")
+}
+
+pub fn project_spec_filename(config: &AgentactrConfig) -> String {
+    let repo_name = config
+        .tracker
+        .repo
+        .rsplit('/')
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("project");
+    let slug = repo_name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    if slug.is_empty() || slug == "repo" {
+        "specs_project.md".to_string()
+    } else {
+        format!("specs_{slug}.md")
+    }
+}
+
+pub fn render_project_spec_md(config: &AgentactrConfig, inspection: &RepoInspection) -> String {
+    format!(
+        r#"# {project_name} Specification
+{generated_marker}
+
+This file is the project-local source of truth for requirements, architecture decisions, quality expectations, and issue-drafting context.
+
+{project_context}
+
+## Requirements
+
+- Add product and implementation requirements here before asking agents to create or solve issues.
+- Keep acceptance criteria explicit and testable.
+- Keep security, data, migration, and operational constraints close to the requirement they affect.
+
+## Architecture Notes
+
+- Keep application code behind explicit domain boundaries.
+- Keep concrete providers, tools, clouds, and trackers behind adapters, configuration, or template profiles.
+- Keep secrets out of source, prompts, generated artifacts, logs, and issue bodies.
+
+## Quality Gates
+
+Use `agentactr quality plan` to inspect the active gates for this repository before running issue automation.
+"#,
+        project_name = project_display_name(config),
+        generated_marker = GENERATED_PROJECT_SPEC_MARKER,
+        project_context = render_project_spec_context_md(config, inspection),
+    )
+}
+
+fn render_project_spec_context_md(config: &AgentactrConfig, inspection: &RepoInspection) -> String {
+    format!(
+        r#"{context_start}
+## Project Context
+
+- repository: {repo}
+- primary_stack: {primary_stack}
+- quality_profile: {quality_profile}
+- tracker: {tracker_kind}
+"#,
+        context_start = PROJECT_SPEC_CONTEXT_START,
+        repo = config.tracker.repo.as_str(),
+        primary_stack = inspection.primary_stack.as_str(),
+        quality_profile = inspection.selected_quality_profile,
+        tracker_kind = config.tracker.kind.as_str(),
+    )
+    .trim_end()
+    .to_string()
+        + "\n"
+        + PROJECT_SPEC_CONTEXT_END
+}
+
+pub fn is_generated_project_spec_md(content: &str) -> bool {
+    content.contains(GENERATED_PROJECT_SPEC_MARKER)
+        || (content.starts_with("# ")
+            && content.contains(" Specification")
+            && content.contains("This file is the project-local source of truth")
+            && content.contains("## Project Context")
+            && content.contains("- quality_profile:"))
+}
+
+pub fn refresh_project_spec_md(
+    existing: &str,
+    config: &AgentactrConfig,
+    inspection: &RepoInspection,
+) -> String {
+    let context = render_project_spec_context_md(config, inspection);
+    if let (Some(start), Some(end)) = (
+        existing.find(PROJECT_SPEC_CONTEXT_START),
+        existing.find(PROJECT_SPEC_CONTEXT_END),
+    ) {
+        if start < end {
+            let replace_end = end + PROJECT_SPEC_CONTEXT_END.len();
+            return format!(
+                "{}{}{}",
+                &existing[..start],
+                context,
+                &existing[replace_end..]
+            );
+        }
+    }
+    let Some(context_heading) = existing.find("\n## Project Context") else {
+        return existing.to_string();
+    };
+    let section_start = context_heading + 1;
+    let after_heading = section_start + "## Project Context".len();
+    let section_end = existing[after_heading..]
+        .find("\n## ")
+        .map(|offset| after_heading + offset + 1)
+        .unwrap_or(existing.len());
+    format!(
+        "{}{}{}",
+        &existing[..section_start],
+        context,
+        &existing[section_end..]
+    )
+}
+
+pub fn is_generated_agents_md(content: &str) -> bool {
+    content.contains(GENERATED_AGENTS_MARKER)
+        || (content.starts_with("# AGENTS.md instructions for this repository")
+            && content.contains("Detected repository stack:")
+            && content.contains("Domain quality gates and architecture checks:"))
+}
+
+fn project_display_name(config: &AgentactrConfig) -> String {
+    config
+        .tracker
+        .repo
+        .rsplit('/')
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("project")
+        .to_string()
 }
 
 fn possible_values_comment(dotted_key: &str) -> Option<&'static str> {
@@ -844,6 +995,7 @@ Strict defaults:
 }
 
 pub fn render_agents_md(config: &AgentactrConfig, inspection: &RepoInspection) -> String {
+    let project_spec = project_spec_filename(config);
     let rendered_domains = filter_template_domains(config, inspection);
     let domains = if rendered_domains.is_empty() {
         "- none detected; declare domains explicitly before blank-project automation".to_string()
@@ -885,10 +1037,11 @@ pub fn render_agents_md(config: &AgentactrConfig, inspection: &RepoInspection) -
     let platform_rules = render_provider_platform_rules(&rendered_domains, &rendered_gates);
     format!(
         r#"# AGENTS.md instructions for this repository
+{generated_marker}
 
-Follow strict SOLID principles across application code, infrastructure code, agentactr core integrations, SDK boundaries, and CLI/runtime adapters.
+Follow strict SOLID principles across application code, infrastructure code, automation hooks, and agent runtime integrations.
 
-The `specs_agentactrSDK.md` specification is the architectural source of truth for agentactr behavior. Update it whenever architectural corrections or contract changes are introduced.
+The `{project_spec}` specification is the architectural source of truth for this repository. Update it whenever requirements, architectural corrections, contract changes, or quality policy changes are introduced.
 
 Enforce:
 
@@ -935,10 +1088,12 @@ Before introducing architectural decisions, refactors, dependency changes, or pr
 "#,
         primary_stack = inspection.primary_stack.as_str(),
         quality_profile = inspection.selected_quality_profile,
-        tracker_kind = config.tracker.kind,
+        tracker_kind = config.tracker.kind.as_str(),
         domains = domains,
         gates = gates,
         platform_rules = platform_rules,
+        generated_marker = GENERATED_AGENTS_MARKER,
+        project_spec = project_spec,
     )
 }
 
@@ -1232,6 +1387,9 @@ mod tests {
 
         let rendered = render_agents_md(&config, &inspection);
 
+        assert!(rendered.contains(GENERATED_AGENTS_MARKER));
+        assert!(rendered.contains("The `specs_project.md` specification"));
+        assert!(!rendered.contains("specs_agentactrSDK.md"));
         assert!(rendered.contains("api_contracts.protobuf"));
         assert!(rendered.contains("rpc.grpc"));
         assert!(rendered.contains("Transport isolation"));
@@ -1250,13 +1408,16 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&root).unwrap();
-        let mut config = AgentactrConfig::strict_defaults("OWNER/REPO");
+        let mut config = AgentactrConfig::strict_defaults("dwaiba/tstpy");
         config.repository.declared_primary_stack = "python".to_string();
+        config.quality.profile = "standard".to_string();
         let inspection = crate::discovery::discover_repository_with_config(&root, &config);
 
         let rendered = render_agents_md(&config, &inspection);
 
+        assert!(rendered.contains("The `specs_tstpy.md` specification"));
         assert!(rendered.contains("- primary_stack: python"));
+        assert!(rendered.contains("- quality_profile: standard"));
         assert!(rendered.contains("language.python"));
         assert!(
             rendered.contains("Keep concrete providers, tools, clouds, and trackers behind ports")
@@ -1266,6 +1427,51 @@ mod tests {
         assert!(!rendered.contains("Treat Valkey"));
         assert!(!rendered.contains("PostgreSQL and ClickHouse"));
         assert!(!rendered.contains("protobuf/gRPC generated DTOs"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn project_spec_uses_repo_slug_and_selected_profile() {
+        let root =
+            std::env::temp_dir().join(format!("agentactr-project-spec-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut config = AgentactrConfig::strict_defaults("dwaiba/tstpy");
+        config.repository.declared_primary_stack = "python".to_string();
+        config.quality.profile = "standard".to_string();
+        let inspection = crate::discovery::discover_repository_with_config(&root, &config);
+
+        assert_eq!(project_spec_filename(&config), "specs_tstpy.md");
+        let rendered = render_project_spec_md(&config, &inspection);
+        assert!(is_generated_project_spec_md(&rendered));
+        assert!(rendered.contains("- repository: dwaiba/tstpy"));
+        assert!(rendered.contains("- primary_stack: python"));
+        assert!(rendered.contains("- quality_profile: standard"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn project_spec_refresh_updates_context_without_dropping_requirements() {
+        let root = std::env::temp_dir().join(format!(
+            "agentactr-project-spec-refresh-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut strict_config = AgentactrConfig::strict_defaults("dwaiba/tstpy");
+        strict_config.repository.declared_primary_stack = "python".to_string();
+        let strict_inspection =
+            crate::discovery::discover_repository_with_config(&root, &strict_config);
+        let mut existing = render_project_spec_md(&strict_config, &strict_inspection);
+        existing.push_str("\n## Requirements\n\n- Preserve this operator-authored requirement.\n");
+
+        let mut standard_config = strict_config.clone();
+        standard_config.quality.profile = "standard".to_string();
+        let standard_inspection =
+            crate::discovery::discover_repository_with_config(&root, &standard_config);
+        let refreshed = refresh_project_spec_md(&existing, &standard_config, &standard_inspection);
+
+        assert!(refreshed.contains("- quality_profile: standard"));
+        assert!(!refreshed.contains("- quality_profile: strict"));
+        assert!(refreshed.contains("Preserve this operator-authored requirement"));
         let _ = std::fs::remove_dir_all(root);
     }
 }

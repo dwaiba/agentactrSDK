@@ -519,6 +519,8 @@ Docker container network policy is separate from Codex command sandbox policy. T
 agentactr.toml
 .codex/config.toml
 WORKFLOW.md
+AGENTS.md when absent and template policy permits generation
+specs_<repo>.md when generated AGENTS references a project-local specification
 .gitignore additions for .agentactr/
 ```
 
@@ -754,10 +756,10 @@ root_group = "agentactr"
 mode = "enforce_on_linux_observe_elsewhere"
 cgroup_v2_required = true
 psi_required = true
-per_issue_memory_high = "6G"
-per_issue_memory_max = "8G"
-per_agent_memory_high = "3G"
-per_agent_memory_max = "4G"
+per_issue_memory_high = "4G"
+per_issue_memory_max = "6G"
+per_agent_memory_high = "2G"
+per_agent_memory_max = "2G"
 psi_memory_some_threshold_us = 150000
 psi_memory_window_us = 1000000
 oom_score_adj = 300
@@ -1186,7 +1188,7 @@ Protobuf checks must enforce: never reuse field numbers, reserve deleted numbers
 
 Configuration keys for domain behavior must remain synchronized across generated `agentactr.toml`, `config get/set`, shell completions, `docs/cli/reference.md`, `commands --json`, `doctor`, tests, and this specification. Required keys include `quality.domains`, `quality.domain_gate_opt_ins`, `architecture.domains`, `architecture.domain_graph_artifact`, `architecture.fail_on_domain_drift`, `templates.enabled_domains`, `templates.framework_profile`, and `templates.agents_policy`. `architecture.domains` controls domain profile/graph composition; `quality.domains` controls domain quality-gate composition. `auto` enables detection, `detected_only` limits matching to detected evidence, `declared_only` limits matching to explicit declarations, exact domain ids declare or filter domains, category selectors such as `language`, `iac`, `database`, `streaming`, `storage`, `communications`, `observability`, `security`, `resilience`, `tenancy`, and `service_patterns` expand to their canonical provider-neutral domain ids, and `disabled`/`none` suppresses that surface fail-closed. Quality execution must preserve the configured domain policy when inspecting run worktrees; it must not silently rebuild an unconfigured auto domain plan.
 
-`agentactr init` and `agentactr doctor --fix-agents` may generate `AGENTS.md` when absent. Existing `AGENTS.md` must not be overwritten by default; the CLI may write a review artifact instead unless an explicit replacement flag is introduced. `templates.agents_policy=generate_when_absent` may write `AGENTS.md` only when absent, `artifact_only` writes only a generated review artifact, and `disabled` performs no AGENTS.md write. Generated AGENTS content must include SOLID/Clean Architecture rules, the spec source-of-truth rule, adapter boundaries, quality gates, domain policies, secure defaults, repo commands, detected evidence, and ambiguity warnings. When `repository.declared_primary_stack` is set to a concrete stack, SDK repository inspection and AGENTS rendering must present that selected stack even for blank/new repositories without filesystem evidence. Platform-specific guidance must be relevant to detected or explicitly declared domains; otherwise generated AGENTS.md should keep only generic provider-neutral boundary and secrets-management rules and avoid PostgreSQL, ClickHouse, Valkey, Kafka, storage, communications, protobuf, gRPC, or observability instructions that do not apply to the project. Secrets-management guidance is universal: generated AGENTS.md must require secrets to stay out of source, prompts, generated artifacts, logs, and issue bodies, and to flow through configured secret stores or environment variables with redaction enabled.
+`agentactr init` and `agentactr doctor --fix-agents` may generate `AGENTS.md` when absent. Generated AGENTS files must reference a project-local `specs_<repo>.md` source-of-truth file, not this SDK repository's `specs_agentactrSDK.md`, and the CLI must create that project spec when absent. Existing hand-written `AGENTS.md` must not be overwritten by default; the CLI may write a review artifact instead unless an explicit replacement flag is introduced. `templates.agents_policy=generate_when_absent` may write `AGENTS.md` only when absent, `artifact_only` writes only a generated review artifact, and `disabled` performs no AGENTS.md write. When a config mutation changes selected stack, quality profile, domain policy, or other AGENTS-rendered guidance, `agentactr config set` may refresh `AGENTS.md` only when the current file is recognized as agentactr-generated; hand-written AGENTS files still win. Generated `specs_<repo>.md` files must mark and refresh only their project-context metadata block on config changes, preserving operator-authored requirements, notes, and acceptance criteria. Generated AGENTS content must include SOLID/Clean Architecture rules, the project spec source-of-truth rule, adapter boundaries, quality gates, domain policies, secure defaults, repo commands, detected evidence, and ambiguity warnings. When `repository.declared_primary_stack` is set to a concrete stack, SDK repository inspection and AGENTS rendering must present that selected stack even for blank/new repositories without filesystem evidence. Platform-specific guidance must be relevant to detected or explicitly declared domains; otherwise generated AGENTS.md should keep only generic provider-neutral boundary and secrets-management rules and avoid PostgreSQL, ClickHouse, Valkey, Kafka, storage, communications, protobuf, gRPC, or observability instructions that do not apply to the project. Secrets-management guidance is universal: generated AGENTS.md must require secrets to stay out of source, prompts, generated artifacts, logs, and issue bodies, and to flow through configured secret stores or environment variables with redaction enabled.
 
 Linear remains a later tracker-adapter milestone. This domain-profile slice may keep tracker testkit readiness and provider-neutral tracker contracts, but it must not claim production Linear support unless a concrete adapter passes the tracker contract suite. SDK code must never depend on GitHub REST, GitHub MCP, Linear GraphQL, or provider JSON shapes.
 

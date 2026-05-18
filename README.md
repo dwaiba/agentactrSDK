@@ -359,6 +359,7 @@ agentactr config set human_intervention.mode fail_closed
 agentactr config set human_intervention.on_codex_approval_request fail_run
 
 agentactr doctor --fix-codex-config
+agentactr doctor --fix-agents
 agentactr doctor --trust-codex-project
 agentactr quality plan
 ```
@@ -734,7 +735,10 @@ For exact option defaults and generated help, use [docs/cli/reference.md](docs/c
 - `.codex/config.toml`
 - `WORKFLOW.md`
 - `AGENTS.md` when absent
+- `specs_<repo>.md` when generated AGENTS needs a project-local source of truth
 - `.gitignore` additions
+
+Generated AGENTS files reference the project-local `specs_<repo>.md`, not this SDK repository's `specs_agentactrSDK.md`. If `agentactr config set ...` changes selected stack, quality profile, domain policy, or other rendered guidance, agentactr refreshes AGENTS only when the existing file is recognized as agentactr-generated; hand-written AGENTS files still win by default. Generated project specs refresh only their metadata context block, preserving operator-authored requirements and notes.
 
 All CLI-owned TOML writes keep possible values visible beside closed-set values:
 
@@ -979,10 +983,10 @@ root_group = "agentactr"
 mode = "enforce_on_linux_observe_elsewhere" # possible values: enforce_on_linux_observe_elsewhere, observe_only
 cgroup_v2_required = true # possible values: true, false
 psi_required = true # possible values: true, false
-per_issue_memory_high = "6G"
-per_issue_memory_max = "8G"
-per_agent_memory_high = "3G"
-per_agent_memory_max = "4G"
+per_issue_memory_high = "4G"
+per_issue_memory_max = "6G"
+per_agent_memory_high = "2G"
+per_agent_memory_max = "2G"
 psi_memory_some_threshold_us = 150000
 psi_memory_window_us = 1000000
 oom_score_adj = 300
@@ -1106,7 +1110,7 @@ GitHub write MCP tools remain disabled by default. SDK-owned REST/GraphQL adapte
 
 `agentactr-sdk/src/discovery.rs` detects repository stack and quality plans for TypeScript, Rust, Golang, and Python. It skips symlinked directories during discovery to avoid traversing outside the checkout.
 
-`agentactr-sdk/src/domains.rs` builds a domain graph from repository evidence and configured domain profiles. `agentactr doctor` reports domain graph and AGENTS policy readiness. `agentactr doctor --fix-agents` creates AGENTS.md only when absent or writes a review artifact when present. For blank or newly initialized projects, `repository.declared_primary_stack` is treated as the selected stack for generated AGENTS.md and quality context, so a declared Python, Rust, Go, or TypeScript project does not render as `unknown` just because source files do not exist yet. Generated AGENTS.md keeps provider/platform guidance scoped to detected or explicitly declared domains; projects without database, streaming, storage, communications, protobuf/gRPC, or observability evidence receive only generic provider-neutral boundary rules plus universal secrets-management guidance.
+`agentactr-sdk/src/domains.rs` builds a domain graph from repository evidence and configured domain profiles. `agentactr doctor` reports domain graph and AGENTS policy readiness. `agentactr doctor --fix-agents` creates AGENTS.md only when absent or writes a review artifact when present. For blank or newly initialized projects, `repository.declared_primary_stack` is treated as the selected stack for generated AGENTS.md and quality context, so a declared Python, Rust, Go, or TypeScript project does not render as `unknown` just because source files do not exist yet. Generated AGENTS.md references a project-local `specs_<repo>.md` file for requirements and architectural notes, and `agentactr config set` refreshes AGENTS only when the existing file is recognized as agentactr-generated. Generated project specs refresh their project-context metadata block while preserving requirements and notes. Generated AGENTS.md keeps provider/platform guidance scoped to detected or explicitly declared domains; projects without database, streaming, storage, communications, protobuf/gRPC, or observability evidence receive only generic provider-neutral boundary rules plus universal secrets-management guidance.
 
 Current graph usage:
 

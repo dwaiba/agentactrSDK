@@ -12,10 +12,11 @@ use crate::{
 use agentactr_execution::{resolve_execution_backend, ExecutionBackend};
 use agentactr_sdk::{
     domain_findings, domain_findings_to_json, domain_graph_to_json, domain_quality_plan_to_json,
-    render_agentactr_toml, render_agents_md, render_codex_config_toml, render_gitignore_additions,
-    render_workflow_md, AdapterVersionReport, AgentRuntime, AgentactrConfig,
-    CodexAppServerTransport, CodexAuthMode, CodexFallbackMode, CodexMode, CodexSdkBridge,
-    DetectedCredentials, IssueTracker, RepoInspection, VersionControl,
+    is_generated_agents_md, is_generated_project_spec_md, project_spec_filename,
+    refresh_project_spec_md, render_agentactr_toml, render_agents_md, render_codex_config_toml,
+    render_gitignore_additions, render_project_spec_md, render_workflow_md, AdapterVersionReport,
+    AgentRuntime, AgentactrConfig, CodexAppServerTransport, CodexAuthMode, CodexFallbackMode,
+    CodexMode, CodexSdkBridge, DetectedCredentials, IssueTracker, RepoInspection, VersionControl,
 };
 use std::env;
 use std::fs;
@@ -185,6 +186,7 @@ fn write_agents_if_absent(
     if Path::new("AGENTS.md").exists() {
         return Ok(());
     }
+    write_project_spec_if_absent(config, inspection)?;
     write_file("AGENTS.md", &render_agents_md(config, inspection))
 }
 
@@ -208,6 +210,7 @@ fn write_agents_if_absent_or_artifact(
         other => return Err(format!("unsupported templates.agents_policy `{other}`")),
     }
     if !Path::new("AGENTS.md").exists() {
+        write_project_spec_if_absent(config, inspection)?;
         write_file("AGENTS.md", &render_agents_md(config, inspection))?;
         println!("fixed AGENTS.md");
         write_domain_artifacts(config, inspection)?;
@@ -220,6 +223,54 @@ fn write_agents_if_absent_or_artifact(
     );
     write_domain_artifacts(config, inspection)?;
     Ok(())
+}
+
+fn write_project_spec_if_absent(
+    config: &AgentactrConfig,
+    inspection: &RepoInspection,
+) -> Result<(), String> {
+    let spec_path = project_spec_filename(config);
+    let path = Path::new(&spec_path);
+    if path.exists() {
+        return Ok(());
+    }
+    write_file(&spec_path, &render_project_spec_md(config, inspection))
+}
+
+fn write_or_refresh_generated_project_spec(
+    config: &AgentactrConfig,
+    inspection: &RepoInspection,
+) -> Result<(), String> {
+    let spec_path = project_spec_filename(config);
+    let path = Path::new(&spec_path);
+    if !path.exists() {
+        return write_file(&spec_path, &render_project_spec_md(config, inspection));
+    }
+    let content = fs::read_to_string(path).map_err(|e| format!("read {spec_path}: {e}"))?;
+    if !is_generated_project_spec_md(&content) {
+        return Ok(());
+    }
+    let refreshed = refresh_project_spec_md(&content, config, inspection);
+    if refreshed != content {
+        write_file(&spec_path, &refreshed)?;
+    }
+    Ok(())
+}
+
+fn refresh_generated_agents_after_config_set() -> Result<bool, String> {
+    let path = Path::new("AGENTS.md");
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = fs::read_to_string(path).map_err(|e| format!("read AGENTS.md: {e}"))?;
+    if !is_generated_agents_md(&content) {
+        return Ok(false);
+    }
+    let config = load_agentactr_config(None)?;
+    let inspection = configured_repo_inspection(Path::new("."), &config);
+    write_or_refresh_generated_project_spec(&config, &inspection)?;
+    write_file("AGENTS.md", &render_agents_md(&config, &inspection))?;
+    Ok(true)
 }
 
 fn write_agents_review_artifact(
@@ -304,6 +355,9 @@ pub(crate) fn cmd_config(args: &mut [String]) -> Result<(), String> {
             }
             set_config_value("agentactr.toml", &args[2], &args[3])?;
             println!("updated {}", args[2]);
+            if refresh_generated_agents_after_config_set()? {
+                println!("refreshed generated AGENTS.md");
+            }
             Ok(())
         }
         other => Err(format!("unknown config subcommand `{other}`")),

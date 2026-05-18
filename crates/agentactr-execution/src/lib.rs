@@ -257,9 +257,9 @@ mod tests {
 
         assert_eq!(command.get_program().to_string_lossy(), "docker");
         assert!(args.contains(&"--memory".to_string()));
-        assert!(args.contains(&"4G".to_string()));
+        assert!(args.contains(&"2G".to_string()));
         assert!(args.contains(&"--memory-reservation".to_string()));
-        assert!(args.contains(&"3G".to_string()));
+        assert!(args.contains(&"2G".to_string()));
         assert!(args.contains(&"ghcr.io/dwaiba/agentactr-runtime:0.1.0-linux-arm64".to_string()));
         assert!(args.contains(&"--network".to_string()));
         assert!(args.contains(&"bridge".to_string()));

@@ -26,8 +26,10 @@ pub use issue_submission::{
     PreparedIssueSubmissionProposal,
 };
 pub use render::{
-    annotate_agentactr_toml_possible_values, render_agentactr_toml, render_agents_md,
-    render_codex_config_toml, render_gitignore_additions, render_workflow_md, DetectedCredentials,
+    annotate_agentactr_toml_possible_values, is_generated_agents_md, is_generated_project_spec_md,
+    project_spec_filename, refresh_project_spec_md, render_agentactr_toml, render_agents_md,
+    render_codex_config_toml, render_gitignore_additions, render_project_spec_md,
+    render_workflow_md, DetectedCredentials,
 };
 pub use resource_governor::{
     select_helper_victim, HelperMemoryCandidate, HelperVictimSelection, MemoryGovernorPolicy,
