@@ -219,6 +219,7 @@ pub enum IssueDedupeStatus {
     Unique,
     PossibleDuplicate,
     DuplicateBlocked,
+    Deferred,
 }
 
 impl IssueDedupeStatus {
@@ -227,6 +228,30 @@ impl IssueDedupeStatus {
             Self::Unique => "unique",
             Self::PossibleDuplicate => "possible_duplicate",
             Self::DuplicateBlocked => "duplicate_blocked",
+            Self::Deferred => "deferred",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum IssueDraftMode {
+    #[default]
+    TrackerBacked,
+    LocalOnly,
+}
+
+impl IssueDraftMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TrackerBacked => "tracker_backed",
+            Self::LocalOnly => "local_only",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "local_only" => Self::LocalOnly,
+            _ => Self::TrackerBacked,
         }
     }
 }
@@ -247,9 +272,15 @@ pub struct IssueSetArtifactContext {
     pub created_at: String,
     pub producer: String,
     pub source: IssueSetSource,
+    pub draft_mode: IssueDraftMode,
     pub repo: String,
     pub parent_issue: Option<u64>,
     pub framework: Option<FrameworkDeclaration>,
+    pub tracker_network_required: bool,
+    pub planner_network_required: bool,
+    pub submit_requires_repo: bool,
+    pub submit_target_repo: Option<String>,
+    pub dedupe_deferred: bool,
     pub artifact_dir: PathBuf,
     pub manifest_path: PathBuf,
     pub candidates_path: PathBuf,
@@ -285,6 +316,7 @@ pub struct IssueDraftRequest {
     pub parent_issue: Option<u64>,
     pub prompt: Option<String>,
     pub framework: Option<FrameworkDeclaration>,
+    pub domain: Option<String>,
     pub stack: Option<String>,
     pub candidates: Vec<Issue>,
     pub query: CandidateQuery,
@@ -295,6 +327,31 @@ pub struct IssueDraftResult {
     pub proposals: Vec<IssueProposal>,
     pub discarded_partial_output: bool,
     pub detail: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct IssueTemplateProfile {
+    pub template_id: String,
+    pub template_family: String,
+    pub template_variant: String,
+    pub template_version: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct IssueTemplateContext {
+    pub stack: Option<String>,
+    pub domain: Option<String>,
+    pub framework: Option<FrameworkDeclaration>,
+    pub prompt_digest: Option<String>,
+    pub repo: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct IssueTemplateRenderResult {
+    pub profile: IssueTemplateProfile,
+    pub title: String,
+    pub body: String,
+    pub provenance: Vec<String>,
 }
 
 fn marker_token(value: &str) -> String {

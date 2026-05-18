@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="300" viewBox="0 0 980 300" role="img" aria-labelledby="title desc">
+  <title id="title">Read-only agent visibility TUI</title>
+  <desc id="desc">Shows the TUI reading run artifacts, trace events, quality reports, lifecycle status, and graph artifacts without mutating run state.</desc>
+  <style>.box{fill:#f8fafc;stroke:#334155;stroke-width:1.4;rx:8}.safe{fill:#ecfdf5;stroke:#047857;stroke-width:1.4;rx:8}.text{font-family:Arial,sans-serif;font-size:15px;fill:#0f172a}.small{font-family:Arial,sans-serif;font-size:12px;fill:#334155}.arrow{stroke:#334155;stroke-width:1.5;fill:none;marker-end:url(#arrow)}</style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/></marker></defs>
+  <rect x="35" y="70" width="185" height="120" class="box"/><text x="55" y="102" class="text">Run artifacts</text><text x="55" y="126" class="small">context_manifest</text><text x="55" y="142" class="small">agent_graph</text><text x="55" y="158" class="small">spawn_handoffs</text><text x="55" y="174" class="small">quality/finalization</text>
+  <rect x="290" y="70" width="170" height="120" class="box"/><text x="310" y="102" class="text">Trace JSONL</text><text x="310" y="126" class="small">ts_unix_ms ordering</text><text x="310" y="142" class="small">latest run lookup</text><text x="310" y="158" class="small">status events</text>
+  <rect x="535" y="55" width="190" height="150" class="safe"/><text x="555" y="88" class="text">agentactr tui</text><text x="555" y="112" class="small">run RUN_ID</text><text x="555" y="128" class="small">latest</text><text x="555" y="144" class="small">--snapshot</text><text x="555" y="160" class="small">--color / --no-color</text><text x="555" y="176" class="small">read-only renderer</text>
+  <rect x="795" y="70" width="150" height="120" class="box"/><text x="815" y="102" class="text">Terminal view</text><text x="815" y="126" class="small">graph pane</text><text x="815" y="142" class="small">agent details</text><text x="815" y="158" class="small">quality/lifecycle</text>
+  <path d="M220 130 H535" class="arrow"/><path d="M460 130 H535" class="arrow"/><path d="M725 130 H795" class="arrow"/>
+</svg>

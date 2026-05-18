@@ -82,7 +82,7 @@ Workspace crates:
 | `agentactr-sdk` | SDK facade, repository discovery, domain graph generation, config rendering, issue proposal planning, issue submission planning, run use cases, and `RunResourceGovernor`. | [crates/agentactr-sdk/src/lib.rs](crates/agentactr-sdk/src/lib.rs), [issue_submission.rs](crates/agentactr-sdk/src/issue_submission.rs), [resource_governor.rs](crates/agentactr-sdk/src/resource_governor.rs), [render.rs](crates/agentactr-sdk/src/render.rs) |
 | `agentactr-codex` | Default Codex runtime adapter. `cli_json` is implemented; `app_server` and `codex_sdk` are selectable fail-closed stubs until contract-tested. | [crates/agentactr-codex/src/lib.rs](crates/agentactr-codex/src/lib.rs) |
 | `agentactr-execution` | Execution backend resolution and Docker command wrapping. | [crates/agentactr-execution/src/lib.rs](crates/agentactr-execution/src/lib.rs) |
-| `agentactr-cli` | Default Rust CLI product, Clap help/catalog generation, GitHub adapter, local Git adapter, SQLite/JSONL artifact wiring, artifact integrity verification, quality gates, Linux memory adapter, setup/config/auth/doctor commands, issue planning/submission commands, bootstrap project command templates, MCP stdio serving, trace inspection, debug bundle creation, and operator commands. Focused command modules use explicit imports instead of crate-wide wildcard imports. | [crates/agentactr-cli/src/main.rs](crates/agentactr-cli/src/main.rs), [adapters.rs](crates/agentactr-cli/src/adapters.rs), [vcs_adapter.rs](crates/agentactr-cli/src/vcs_adapter.rs), [vcs_commands.rs](crates/agentactr-cli/src/vcs_commands.rs), [setup_commands.rs](crates/agentactr-cli/src/setup_commands.rs), [issue_commands.rs](crates/agentactr-cli/src/issue_commands.rs), [quality_command.rs](crates/agentactr-cli/src/quality_command.rs), [bootstrap_project.rs](crates/agentactr-cli/src/bootstrap_project.rs), [command_catalog.rs](crates/agentactr-cli/src/command_catalog.rs), [docs_command.rs](crates/agentactr-cli/src/docs_command.rs), [mcp_command.rs](crates/agentactr-cli/src/mcp_command.rs), [trace_command.rs](crates/agentactr-cli/src/trace_command.rs), [debug_bundle.rs](crates/agentactr-cli/src/debug_bundle.rs), [linux_memory.rs](crates/agentactr-cli/src/linux_memory.rs), [artifacts.rs](crates/agentactr-cli/src/artifacts.rs) |
+| `agentactr-cli` | Default Rust CLI product, Clap help/catalog generation, GitHub adapter, local Git adapter, SQLite/JSONL artifact wiring, artifact integrity verification, quality gates, Linux memory adapter, setup/config/auth/doctor commands, issue planning/submission commands, bootstrap project command templates, MCP stdio serving, trace inspection, read-only TUI rendering, debug bundle creation, terminal color policy, and operator commands. Focused command modules use explicit imports instead of crate-wide wildcard imports. | [crates/agentactr-cli/src/main.rs](crates/agentactr-cli/src/main.rs), [adapters.rs](crates/agentactr-cli/src/adapters.rs), [vcs_adapter.rs](crates/agentactr-cli/src/vcs_adapter.rs), [vcs_commands.rs](crates/agentactr-cli/src/vcs_commands.rs), [setup_commands.rs](crates/agentactr-cli/src/setup_commands.rs), [issue_commands.rs](crates/agentactr-cli/src/issue_commands.rs), [quality_command.rs](crates/agentactr-cli/src/quality_command.rs), [bootstrap_project.rs](crates/agentactr-cli/src/bootstrap_project.rs), [command_catalog.rs](crates/agentactr-cli/src/command_catalog.rs), [docs_command.rs](crates/agentactr-cli/src/docs_command.rs), [mcp_command.rs](crates/agentactr-cli/src/mcp_command.rs), [trace_command.rs](crates/agentactr-cli/src/trace_command.rs), [tui_command.rs](crates/agentactr-cli/src/tui_command.rs), [terminal.rs](crates/agentactr-cli/src/terminal.rs), [debug_bundle.rs](crates/agentactr-cli/src/debug_bundle.rs), [linux_memory.rs](crates/agentactr-cli/src/linux_memory.rs), [artifacts.rs](crates/agentactr-cli/src/artifacts.rs) |
 
 Rust workspace governance:
 
@@ -278,7 +278,7 @@ agentactr bootstrap project --stack <python|golang|rust|typescript|pulumi|terraf
 # Optional: inspect existing tracker issues for dedupe inventory.
 agentactr issue find --repo <OWNER/REPONAME> --limit 50 --json
 
-# Draft local issue proposals from a prompt and repo evidence.
+# Draft tracker-backed local issue proposals from a prompt and repo evidence.
 agentactr issue draft \
   --repo <OWNER/REPONAME> \
   --prompt "Create the initial backlog for this blank project." \
@@ -295,7 +295,23 @@ agentactr run issue --repo <OWNER/REPONAME> --issue <ISSUE_NUMBER>
 
 `bootstrap project` is explicit and write-capable. It is intended for blank projects, refuses non-empty directories by default, allows agentactr init metadata such as `.git`, `.codex`, `.agentactr`, `agentactr.toml`, `WORKFLOW.md`, and `.gitignore`, refuses to overwrite existing files unless `--force` is supplied, and merges missing `.gitignore` scaffold entries without deleting existing entries. It prints every written file and the stack-specific start commands. Use `--allow-non-empty` only after reviewing the target directory.
 
-Current boundary: `agentactr issue find`, `agentactr issue draft`, `agentactr issue submit`, and `agentactr run issue` are tracker-backed workflows. `issue draft` currently requires `--repo OWNER/REPO` because it fetches existing GitHub issues for dedupe inventory before writing local proposals. Fully offline/local-only issue proposal drafting is not implemented in the present repo state.
+Tracker-offline drafting is available with `issue draft --local`. Deterministic local drafts do not construct the GitHub adapter, write an empty candidate artifact with `reason = "not_fetched_local_draft"`, use `repo = "local:<workspace_slug>"`, and mark proposal dedupe as `deferred`. Submit-time GitHub mutation still requires an explicit target repository:
+
+```bash
+agentactr issue draft \
+  --local \
+  --prompt "Create the initial backlog for this blank project." \
+  --stack <python|golang|rust|typescript> \
+  --json
+
+agentactr issue proposals <ISSUE_SET_ID>
+agentactr issue submit <ISSUE_SET_ID> \
+  --proposal <PROPOSAL_ID> \
+  --repo <OWNER/REPONAME> \
+  --yes
+```
+
+`--codex-draft` and `--codex-review` may be combined with `--local`, but those modes are only tracker-offline: they can still require Codex auth and planner network access. Plain deterministic `--local --prompt ...` remains fully offline.
 
 Supported scaffold surfaces:
 
@@ -304,8 +320,8 @@ Supported scaffold surfaces:
 | `python` | `pyproject.toml` with Hatch build backend, `uv`, Ruff, Pytest, Pyright, `poetry.toml`, `src/`, `tests/`, and pre-commit hooks. |
 | `golang` / `go` | `go.mod`, `cmd/`, `internal/`, tests, `golangci-lint`, and pre-commit hooks. |
 | `rust` | Workspace layout modeled after this repo, pinned `rust-toolchain.toml`, declared workspace MSRV, `deny.toml`, tests, and pre-commit hooks. |
-| `typescript` | Bun, Biome, TypeScript strict mode, tests, and pre-commit hooks. |
-| `pulumi` | TypeScript Pulumi project with Bun, Biome, tests, and pre-commit hooks. Live `pulumi preview` is documented as optional because it can require credentials, backend access, and network. |
+| `typescript` | Bun, Biome, TypeScript strict mode, tests, and pre-commit hooks. Fresh scaffolds use plain `bun install` so the first install can create `bun.lock`, and generated NodeNext tests import local TypeScript modules through emitted `.js` specifiers. |
+| `pulumi` | TypeScript Pulumi project with Bun, Biome, tests, and pre-commit hooks. Fresh scaffolds use plain `bun install` so the first install can create `bun.lock`. Live `pulumi preview` is documented as optional because it can require credentials, backend access, and network. |
 | `terraform` | Modular Terraform layout, tracked `.terraform.lock.hcl` provider lock policy, `terraform fmt`, `validate`, `test`, and pre-commit hooks. |
 | `sql` | Forward migrations, reviewed rollbacks, backfills, seeds, smoke tests, SQLFluff, and pre-commit hooks. |
 
@@ -456,7 +472,7 @@ Use this path when you want agentactr to help create GitHub issues, run an LLM a
 # 1. Inspect existing GitHub issues without running agents or mutating GitHub.
 agentactr issue find --repo <OWNER/REPONAME> --limit 50 --json
 
-# 2. Draft local issue proposals from a reviewed prompt and repo evidence.
+# 2a. Draft tracker-backed local issue proposals from a reviewed prompt and repo evidence.
 agentactr issue draft \
   --repo <OWNER/REPONAME> \
   --prompt "Break this work into small independently implementable issues." \
@@ -466,12 +482,21 @@ agentactr issue draft \
   --codex-review \
   --json
 
+# 2b. Or draft tracker-offline proposals first, then bind a target repo only at submit time.
+agentactr issue draft \
+  --local \
+  --prompt "Break this work into small independently implementable issues." \
+  --stack <typescript|rust|golang|python> \
+  --domain <postgres|terraform|grpc|none> \
+  --json
+
 # 3. Review local proposals before GitHub mutation.
 agentactr issue proposals <ISSUE_SET_ID>
 
-# 4. Submit one reviewed proposal to GitHub.
+# 4. Submit one reviewed proposal to GitHub. Local issue sets require explicit --repo.
 agentactr issue submit <ISSUE_SET_ID> \
   --proposal <PROPOSAL_ID> \
+  --repo <OWNER/REPONAME> \
   --yes \
   --require-codex-review
 
@@ -512,6 +537,7 @@ git push
 Notes:
 
 - `issue find`, `issue draft`, and `issue proposals` are local/read-only until `issue submit --yes`.
+- `issue draft --local` is tracker-offline and defers dedupe until `issue submit ... --repo OWNER/REPO --yes`.
 - `--codex-draft` asks Codex to draft structured proposals; `--codex-review` records a separate Codex review artifact before submission.
 - `run issue` creates an isolated worktree and artifacts; `vcs apply` helps move reviewed patch artifacts into the source checkout, while commit, push, PR, and merge remain normal Git workflow.
 - `finalize --approve` updates tracker lifecycle state after review; it is not a Git merge.
@@ -523,6 +549,18 @@ The generated reference is [docs/cli/reference.md](docs/cli/reference.md). Regen
 ```bash
 target/release/agentactr docs cli-markdown --output docs/cli/reference.md
 ```
+
+![Read-only agent visibility TUI](internal_readme/agent_visibility_tui.svg)
+
+Human output accepts a top-level `--color auto|always|never` flag before the command. `NO_COLOR`, non-TTY output, and `--json` keep machine-readable output uncolored. The read-only TUI consumes existing run artifacts and trace events only:
+
+```bash
+agentactr tui run RUN_ID --snapshot
+agentactr tui run RUN_ID --refresh 1s
+agentactr tui latest
+```
+
+`tui latest` resolves the newest run from trace `ts_unix_ms` ordering, not artifact directory modification time. Missing graph artifacts are reported as diagnostics. When artifacts are present, the TUI renders agent graph nodes with event-derived pending/active/complete/failed/blocked/review state, runtime process activity, parsed quality gate status, GitHub lifecycle events, and finalization state. The TUI does not mutate worktrees, SQLite state, GitHub, Codex state, or run lifecycle.
 
 ![CLI command surface groups](internal_readme/command_surface.svg)
 
@@ -611,6 +649,8 @@ agentactr issue find --repo OWNER/REPO --include-pull-requests
 agentactr issue find --repo OWNER/REPO --artifact-root .agentactr/artifacts/issues --json
 
 agentactr issue draft --repo OWNER/REPO --prompt "TEXT" --stack typescript
+agentactr issue draft --local --prompt "TEXT" --stack python
+agentactr issue draft --local --prompt-file prompt.txt --stack rust --domain grpc
 agentactr issue draft --repo OWNER/REPO --prompt-file prompt.txt --stack rust
 agentactr issue draft --repo OWNER/REPO --prompt "TEXT" --stack typescript --framework nextjs
 agentactr issue draft --repo OWNER/REPO --prompt "TEXT" --stack typescript --framework none
@@ -623,6 +663,7 @@ agentactr issue proposals ISSUE_SET_ID
 agentactr issue mark ISSUE_SET_ID --proposal PROPOSAL_ID --dedupe unique --reason "reviewed"
 agentactr issue mark ISSUE_SET_ID --proposal PROPOSAL_ID --dedupe duplicate_blocked --reason "already covered"
 agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes
+agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --repo OWNER/REPO --yes
 agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes --require-codex-review
 agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes --allow-possible-duplicate --reason "operator approved duplicate risk"
 agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --resume --yes
@@ -659,6 +700,9 @@ agentactr merge plan RUN_ID
 agentactr merge plan RUN_ID --json
 agentactr trace list
 agentactr trace show RUN_ID
+agentactr --color auto tui run RUN_ID --snapshot
+agentactr --color never tui latest
+agentactr tui run RUN_ID --refresh 1s
 agentactr debug bundle RUN_ID
 agentactr memory status
 agentactr memory pressure
@@ -988,19 +1032,20 @@ agentactr finalize RUN_ID --reject --reason "reason"
 Issue proposal workflow is separate from implementation runs:
 
 1. `issue find` creates read-only candidate inventory artifacts.
-2. `issue draft --repo OWNER/REPO` creates local issue proposals using deterministic planning or optional read-only Codex drafting after fetching tracker inventory for dedupe.
-3. `issue draft --codex-review` records Codex review artifacts and an approval status.
-4. `issue proposals` lists local proposals.
-5. `issue mark` records local dedupe decisions.
-6. `issue submit ... --yes` performs review-gated GitHub mutation through the tracker port.
-
-Blank local scaffold/init is available without a remote repository, but issue proposal workflows currently require a concrete tracker repo. That keeps dedupe and submission tied to the provider-neutral tracker port and the default GitHub adapter.
+2. `issue draft --repo OWNER/REPO` creates local issue proposals using deterministic stack/domain templates or optional read-only Codex drafting after fetching tracker inventory for dedupe.
+3. `issue draft --local` creates tracker-offline issue proposals without constructing the GitHub adapter. The candidate artifact records `reason = "not_fetched_local_draft"`, proposal repo is `local:<workspace_slug>`, and dedupe is `deferred`.
+4. `issue draft --codex-review` records Codex review artifacts and an approval status.
+5. `issue proposals` lists local proposals.
+6. `issue mark` records local dedupe decisions.
+7. `issue submit ... --yes` performs review-gated GitHub mutation through the tracker port. Local issue sets must pass `--repo OWNER/REPO`; submit then fetches candidates, recomputes dedupe, blocks exact duplicates, and uses a target-bound `submission_digest` for ledger rows and recovery markers.
 
 Submission idempotency is ledger-backed. The SDK key is:
 
 ```text
 (issue_set_id, proposal_id, repo, parent_issue_key, proposal_digest)
 ```
+
+For tracker-backed drafts, `proposal_digest` is the proposal's draft digest. For local drafts submitted to GitHub, the stored draft artifact keeps `draft_digest`, while submit computes a separate target-bound `submission_digest` and uses that value in the ledger and recovery marker.
 
 Allowed states are `pending`, `submitted`, `created`, `linked`, `created_unlinked`, `created_metadata_mismatch`, and `failed`, matching [specs_agentactrSDK.md:2777](specs_agentactrSDK.md#L2777)-[2787](specs_agentactrSDK.md#L2787).
 

@@ -17,7 +17,7 @@ This reference is generated from the typed `clap` command tree and the bootstrap
 ```text
 Run agentactr issue automation and inspect local run artifacts.
 
-Usage: agentactr [COMMAND]
+Usage: agentactr [OPTIONS] [COMMAND]
 
 Commands:
   help         Print command help. Use `agentactr help COMMAND [SUBCOMMAND...]`.
@@ -33,6 +33,7 @@ Commands:
   issue        Inspect and submit agent-proposed tracker issues.
   daemon       Run the future scheduler/daemon. Milestone command.
   trace        Inspect the local run trace ledger.
+  tui          Render read-only agent run visibility views.
   debug        Create local debug bundles.
   replay       Rebuild run state from trace/artifacts. Milestone command.
   merge        Plan merge readiness without mutating Git or GitHub.
@@ -47,6 +48,11 @@ Commands:
   status       Print bootstrap CLI status.
 
 Options:
+      --color <auto|always|never>
+          Control ANSI color for human output.
+
+          [possible values: auto, always, never]
+
   -h, --help
           Print help
 ```
@@ -394,7 +400,7 @@ Options:
 
 | Catalog command | Status | Side effects | SDK owner | Required credentials | Platform constraints | Purpose |
 | --- | --- | --- | --- | --- | --- | --- |
-| `agentactr issue draft --repo OWNER/REPO [--prompt TEXT\|--prompt-file PATH] --stack STACK [--framework nextjs\|none] [--parent ISSUE_NUMBER] [--artifact-root PATH] [--codex-draft] [--codex-review] [--json]` | `implemented` | `creates_issue_set_artifacts_and_optional_codex_draft_or_review_artifacts` | `issue_drafting` | `github_token,codex_auth_when_codex_draft_or_review_enabled` | `github_rest_for_dedupe_inventory,codex_cli_for_codex_draft_or_review` | Draft local issue proposals from repo evidence, deterministic prompt policy, or read-only Codex-authored structured output, optionally running a separate Codex review before GitHub submission. |
+| `agentactr issue draft (--repo OWNER/REPO\|--local) [--prompt TEXT\|--prompt-file PATH] --stack STACK [--framework nextjs\|none] [--domain DOMAIN] [--parent ISSUE_NUMBER] [--artifact-root PATH] [--codex-draft] [--codex-review] [--json]` | `implemented` | `creates_issue_set_artifacts_and_optional_codex_draft_or_review_artifacts_local_mode_never_calls_tracker` | `issue_drafting` | `github_token_for_tracker_backed_draft_or_submit,codex_auth_when_codex_draft_or_review_enabled` | `github_rest_for_tracker_backed_dedupe_inventory,codex_cli_for_codex_draft_or_review` | Draft tracker-backed or tracker-offline local issue proposals from repo evidence, deterministic stack/domain template policy, or read-only Codex-authored structured output. |
 
 #### Generated Help
 
@@ -403,11 +409,14 @@ Command: agentactr issue draft
 
 Draft local issue proposals from repo evidence or a prompt.
 
-Usage: draft [OPTIONS] --repo <OWNER/REPO>
+Usage: draft [OPTIONS]
 
 Options:
       --repo <OWNER/REPO>
 
+
+      --local
+          Draft tracker-offline local issue proposals.
 
       --prompt <TEXT>
 
@@ -419,6 +428,9 @@ Options:
 
 
       --framework <nextjs|none>
+
+
+      --domain <DOMAIN>
 
 
       --parent <ISSUE_NUMBER>
@@ -471,7 +483,7 @@ Options:
 
 | Catalog command | Status | Side effects | SDK owner | Required credentials | Platform constraints | Purpose |
 | --- | --- | --- | --- | --- | --- | --- |
-| `agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--resume] [--allow-possible-duplicate --reason REASON] [--require-codex-review]` | `implemented` | `writes_sqlite_and_may_mutate_tracker_when_adapter_supports_issue_create_link` | `issue_submission` | `github_token` | `recorded_issue_set_or_run_artifacts` | Submit or resume one review-gated issue proposal through capability-gated tracker ports. |
+| `agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--repo OWNER/REPO for local issue sets] [--resume] [--allow-possible-duplicate --reason REASON] [--require-codex-review]` | `implemented` | `writes_sqlite_and_may_mutate_tracker_when_adapter_supports_issue_create_link` | `issue_submission` | `github_token` | `recorded_issue_set_or_run_artifacts` | Submit or resume one review-gated issue proposal through capability-gated tracker ports, recomputing deferred local dedupe against the explicit target repo before mutation. |
 
 #### Generated Help
 
@@ -490,6 +502,9 @@ Options:
       --proposal <PROPOSAL_ID>
 
 
+      --repo <OWNER/REPO>
+
+
       --resume
 
 
@@ -504,6 +519,65 @@ Options:
 
       --require-codex-review
 
+
+  -h, --help
+          Print help
+```
+
+### `agentactr tui run`
+
+| Catalog command | Status | Side effects | SDK owner | Required credentials | Platform constraints | Purpose |
+| --- | --- | --- | --- | --- | --- | --- |
+| `agentactr tui run RUN_ID [--refresh 1s] [--snapshot] [--no-color]` | `implemented` | `read_only_artifact_trace_rendering` | `cli_operator_visibility` | `none` | `recorded_run_artifacts` | Render a read-only terminal view of one run's agent graph, trace, quality, and lifecycle artifacts. |
+
+#### Generated Help
+
+```text
+Command: agentactr tui run
+
+Render a read-only run visibility snapshot or refreshing terminal view.
+
+Usage: run [OPTIONS] <RUN_ID>
+
+Arguments:
+  <RUN_ID>
+
+
+Options:
+      --refresh <DURATION>
+
+
+      --snapshot
+          Render deterministic non-interactive text.
+
+      --no-color
+          Disable ANSI color for this TUI command.
+
+  -h, --help
+          Print help
+```
+
+### `agentactr tui latest`
+
+| Catalog command | Status | Side effects | SDK owner | Required credentials | Platform constraints | Purpose |
+| --- | --- | --- | --- | --- | --- | --- |
+| `agentactr tui latest [--refresh 1s] [--no-color]` | `implemented` | `read_only_artifact_trace_rendering` | `cli_operator_visibility` | `none` | `recorded_trace_and_run_artifacts` | Resolve the latest run from trace timestamps and render the read-only terminal visibility view. |
+
+#### Generated Help
+
+```text
+Command: agentactr tui latest
+
+Resolve the latest run from trace timestamps and render it read-only.
+
+Usage: latest [OPTIONS]
+
+Options:
+      --refresh <DURATION>
+
+
+      --no-color
+          Disable ANSI color for this TUI command.
 
   -h, --help
           Print help

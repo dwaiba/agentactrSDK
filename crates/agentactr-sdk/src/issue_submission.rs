@@ -2,7 +2,8 @@ use agentactr_core::{
     redaction_safe_issue_marker, FrameworkDeclaration, Issue, IssueCreateRequest,
     IssueDedupeStatus, IssueDraftPlanner, IssueDraftRequest, IssueDraftResult, IssueId,
     IssueLinkRequest, IssueProjectFieldValue, IssueProposal, IssueProposalId,
-    IssueSubmissionLedgerEntry, IssueSubmissionLedgerKey, IssueSubmissionLedgerState, PortResult,
+    IssueSubmissionLedgerEntry, IssueSubmissionLedgerKey, IssueSubmissionLedgerState,
+    IssueTemplateProfile, PortResult,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -44,6 +45,15 @@ pub fn parent_issue_key(parent_issue: Option<u64>) -> String {
         .unwrap_or_else(|| "top_level".to_string())
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedIssueSubmissionProposal {
+    pub proposal: IssueProposal,
+    pub draft_digest: String,
+    pub submission_digest: String,
+    pub target_repo: String,
+    pub recomputed_dedupe: IssueDedupeStatus,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct DeterministicIssueDraftPlanner;
 
@@ -79,17 +89,24 @@ pub fn draft_issue_proposals(req: IssueDraftRequest) -> Result<IssueDraftResult,
         });
     }
 
-    let title = format!("Bootstrap {stack} project prerequisites for agentactr");
-    let body = format!(
-        "Prepare this {stack} project so agentactr can run deterministic quality checks and issue-driven automation.\n\nThis proposal was generated from deterministic SDK policy using repository configuration and issue inventory evidence."
+    let family = select_issue_template_family(stack, req.domain.as_deref(), req.framework.as_ref());
+    let template = generic_stack_template(
+        &req,
+        stack,
+        &family,
+        "bootstrap-prerequisites",
+        &format!("Bootstrap {stack} project prerequisites for agentactr"),
+        &[
+            "Prepare the repository structure needed for deterministic issue-driven automation.",
+            "Keep implementation boundaries aligned with the configured stack and repository policy.",
+            "Record any missing toolchain or quality-gate prerequisite before execution.",
+        ],
+        &[
+            "The project has stack-appropriate source, test, and quality-gate entry points.",
+            "Required setup commands are documented and reproducible.",
+            "Follow-up implementation issues can run without ambiguous repository state.",
+        ],
     );
-    let provenance = vec!["repo_evidence:deterministic_no_prompt".to_string()];
-    let template = DraftIssueTemplate {
-        slug: "bootstrap-prerequisites".to_string(),
-        title,
-        body,
-        provenance,
-    };
     Ok(IssueDraftResult {
         proposals: vec![build_issue_proposal(&req, template)],
         discarded_partial_output: false,
@@ -507,6 +524,135 @@ fn build_issue_proposal(req: &IssueDraftRequest, template: DraftIssueTemplate) -
     }
 }
 
+fn template_profile(family: &str, variant: &str) -> IssueTemplateProfile {
+    IssueTemplateProfile {
+        template_id: format!("agentactr.issue.{family}.{variant}.v1"),
+        template_family: family.to_string(),
+        template_variant: variant.to_string(),
+        template_version: "1".to_string(),
+    }
+}
+
+fn template_provenance(
+    profile: &IssueTemplateProfile,
+    extra: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let mut provenance = vec![
+        format!("template_id:{}", profile.template_id),
+        format!("template_family:{}", profile.template_family),
+        format!("template_variant:{}", profile.template_variant),
+        format!("template_version:{}", profile.template_version),
+    ];
+    provenance.extend(extra);
+    provenance
+}
+
+fn select_issue_template_family(
+    stack: &str,
+    domain: Option<&str>,
+    framework: Option<&FrameworkDeclaration>,
+) -> String {
+    if let Some(framework) = framework {
+        if framework.id.eq_ignore_ascii_case("nextjs") {
+            return "nextjs".to_string();
+        }
+    }
+    if let Some(domain) = domain {
+        let normalized = domain.trim().to_lowercase();
+        if matches!(
+            normalized.as_str(),
+            "pulumi"
+                | "terraform"
+                | "sql"
+                | "postgres"
+                | "postgresql"
+                | "clickhouse"
+                | "kafka"
+                | "valkey"
+                | "protobuf"
+                | "grpc"
+        ) {
+            return if normalized == "postgresql" {
+                "postgres".to_string()
+            } else {
+                normalized
+            };
+        }
+    }
+    match stack.trim().to_lowercase().as_str() {
+        "python" | "golang" | "rust" | "typescript" => stack.trim().to_lowercase(),
+        _ => "generic".to_string(),
+    }
+}
+
+fn generic_stack_template(
+    req: &IssueDraftRequest,
+    stack: &str,
+    family: &str,
+    slug: &str,
+    title: &str,
+    scope: &[&str],
+    acceptance: &[&str],
+) -> DraftIssueTemplate {
+    let profile = template_profile(family, slug);
+    let security_notes = match family {
+        "postgres" | "clickhouse" | "sql" => {
+            "- Keep migrations, rollback notes, and backfills explicit.\n- Review destructive schema changes before execution."
+        }
+        "kafka" | "valkey" => {
+            "- Document replay, retry, idempotency, and data retention behavior.\n- Keep credentials and connection strings out of issue bodies."
+        }
+        "pulumi" | "terraform" => {
+            "- Treat previews and applies as credential/network-required operations.\n- Keep provider configuration behind explicit operator-controlled settings."
+        }
+        "protobuf" | "grpc" => {
+            "- Keep generated DTOs at adapter boundaries.\n- Review compatibility, status mapping, deadlines, and cancellation behavior."
+        }
+        _ => "- Do not persist raw secrets or credentials.\n- Keep external mutations behind reviewed quality gates.",
+    };
+    let body = format!(
+        "Summary\n\
+         Implement the requested `{family}` work for `{repo}` with repository policy and stack gates preserved.\n\n\
+         Evidence / Current State\n\
+         - Stack: `{stack}`{framework}\n\
+         - Draft source: deterministic SDK issue template\n\
+         - Domain: `{domain}`\n\n\
+         Scope\n{scope}\n\n\
+         Acceptance Criteria\n{acceptance}\n\n\
+         Architecture Boundaries\n\
+         - Keep provider-specific clients, transport details, and generated artifacts outside domain entities.\n\
+         - Preserve existing agentactr core/SDK/CLI ownership boundaries.\n\n\
+         Quality Gates\n\
+         - Run the configured stack quality plan before finalization.\n\
+         - Record any omitted gate with an explicit reason.\n\n\
+         Security / Data / Migration Notes\n{security_notes}\n\n\
+         Test Plan\n\
+         - Add or update focused tests for changed behavior.\n\
+         - Run existing validation commands relevant to `{stack}`.\n\n\
+         Agentactr Artifacts\n\
+         - Issue-set artifact: `{issue_set_id}`\n\n\
+         Dedupe / Related Issues\n\
+         - Dedupe is evaluated from current candidate issue titles before tracker submission.",
+        family = profile.template_family,
+        repo = req.repo,
+        stack = stack,
+        framework = framework_suffix(req.framework.as_ref()),
+        domain = req.domain.as_deref().unwrap_or("none"),
+        scope = markdown_bullets(scope),
+        acceptance = markdown_bullets(acceptance),
+        issue_set_id = req.issue_set_id,
+    );
+    DraftIssueTemplate {
+        slug: slug.to_string(),
+        title: title.to_string(),
+        body,
+        provenance: template_provenance(
+            &profile,
+            ["repo_evidence:deterministic_no_prompt".to_string()],
+        ),
+    }
+}
+
 fn prompt_issue_templates(
     prompt: &str,
     req: &IssueDraftRequest,
@@ -650,7 +796,7 @@ fn prompt_issue_templates(
     }
 
     if templates.is_empty() {
-        templates.push(nextjs_prompt_template(
+        templates.push(generic_prompt_template(
             req,
             stack,
             prompt_sha,
@@ -681,21 +827,103 @@ fn nextjs_prompt_template(
     scope: &[&str],
     acceptance: &[&str],
 ) -> DraftIssueTemplate {
+    let profile = template_profile("nextjs", slug);
     let body = format!(
-        "Drafted from a reviewed operator prompt for `{}`.\n\nRaw prompt persistence is disabled by default. Review `planner_prompt.redacted.txt` and `planner_prompt_metadata.json` in the issue-set artifact before submission.\n\nPrompt digest: `sha256:{prompt_sha}`\nStack: `{stack}`{}\n\nScope:\n{}\n\nAcceptance criteria:\n{}",
+        "Summary\n\
+         Drafted from a reviewed operator prompt for `{}`.\n\n\
+         Evidence / Current State\n\
+         - Raw prompt persistence is disabled by default.\n\
+         - Review `planner_prompt.redacted.txt` and `planner_prompt_metadata.json` in the issue-set artifact before submission.\n\
+         - Prompt digest: `sha256:{prompt_sha}`\n\
+         - Stack: `{stack}`{}\n\n\
+         Scope\n{}\n\n\
+         Acceptance Criteria\n{}\n\n\
+         Architecture Boundaries\n\
+         - Keep Next.js route handling, validation, data access, and domain boundaries explicit.\n\
+         - Avoid leaking provider-specific clients into domain code.\n\n\
+         Quality Gates\n\
+         - Run the configured TypeScript quality plan before finalization.\n\n\
+         Security / Data / Migration Notes\n\
+         - Do not persist raw secrets or unredacted prompt content.\n\n\
+         Test Plan\n\
+         - Add focused tests for route, domain, and validation changes.\n\n\
+         Agentactr Artifacts\n\
+         - Issue-set artifact: `{}`\n\n\
+         Dedupe / Related Issues\n\
+         - Dedupe is evaluated from current candidate issue titles before tracker submission.",
         req.repo,
         framework_suffix(req.framework.as_ref()),
         markdown_bullets(scope),
         markdown_bullets(acceptance),
+        req.issue_set_id,
     );
     DraftIssueTemplate {
         slug: slug.to_string(),
         title: title.to_string(),
         body,
-        provenance: vec![
-            format!("prompt_sha256:{prompt_sha}"),
-            format!("prompt_template:{slug}"),
-        ],
+        provenance: template_provenance(
+            &profile,
+            [
+                format!("prompt_sha256:{prompt_sha}"),
+                format!("prompt_template:{slug}"),
+            ],
+        ),
+    }
+}
+
+fn generic_prompt_template(
+    req: &IssueDraftRequest,
+    stack: &str,
+    prompt_sha: &str,
+    slug: &str,
+    title: &str,
+    scope: &[&str],
+    acceptance: &[&str],
+) -> DraftIssueTemplate {
+    let family = select_issue_template_family(stack, req.domain.as_deref(), req.framework.as_ref());
+    let profile = template_profile(&family, slug);
+    let body = format!(
+        "Summary\n\
+         Drafted from a reviewed operator prompt for `{}`.\n\n\
+         Evidence / Current State\n\
+         - Raw prompt persistence is disabled by default.\n\
+         - Review `planner_prompt.redacted.txt` and `planner_prompt_metadata.json` in the issue-set artifact before submission.\n\
+         - Prompt digest: `sha256:{prompt_sha}`\n\
+         - Stack: `{stack}`{}\n\
+         - Domain: `{}`\n\n\
+         Scope\n{}\n\n\
+         Acceptance Criteria\n{}\n\n\
+         Architecture Boundaries\n\
+         - Keep provider-specific integrations behind adapters and explicit contracts.\n\
+         - Preserve repository/service separation for the selected stack.\n\n\
+         Quality Gates\n\
+         - Run the configured quality plan before finalization.\n\n\
+         Security / Data / Migration Notes\n\
+         - Do not persist raw secrets or unredacted prompt content.\n\n\
+         Test Plan\n\
+         - Add focused tests for the changed behavior.\n\n\
+         Agentactr Artifacts\n\
+         - Issue-set artifact: `{}`\n\n\
+         Dedupe / Related Issues\n\
+         - Dedupe is evaluated from current candidate issue titles before tracker submission.",
+        req.repo,
+        framework_suffix(req.framework.as_ref()),
+        req.domain.as_deref().unwrap_or("none"),
+        markdown_bullets(scope),
+        markdown_bullets(acceptance),
+        req.issue_set_id,
+    );
+    DraftIssueTemplate {
+        slug: slug.to_string(),
+        title: title.to_string(),
+        body,
+        provenance: template_provenance(
+            &profile,
+            [
+                format!("prompt_sha256:{prompt_sha}"),
+                format!("prompt_template:{slug}"),
+            ],
+        ),
     }
 }
 
@@ -750,6 +978,44 @@ fn classify_issue_dedupe(title: &str, candidates: &[Issue]) -> (IssueDedupeStatu
     } else {
         (IssueDedupeStatus::Unique, related)
     }
+}
+
+pub fn prepare_issue_submission_proposal(
+    mut proposal: IssueProposal,
+    target_repo: String,
+    candidates: &[Issue],
+) -> Result<PreparedIssueSubmissionProposal, String> {
+    let target_repo = target_repo.trim();
+    if target_repo.is_empty() || target_repo.starts_with("local:") {
+        return Err("local issue submission requires a concrete OWNER/REPO target".to_string());
+    }
+    let draft_digest = proposal.digest.clone();
+    let (recomputed_dedupe, related_issues) = classify_issue_dedupe(&proposal.title, candidates);
+    proposal.repo = target_repo.to_string();
+    proposal.dedupe = recomputed_dedupe;
+    proposal.related_issues = related_issues;
+    let submission_digest = proposal_digest(ProposalDigestInput {
+        repo: &proposal.repo,
+        parent_issue: proposal.parent_issue,
+        title: &proposal.title,
+        body: &proposal.body,
+        labels: &proposal.labels,
+        assignees: &proposal.assignees,
+        milestone: proposal.milestone.as_deref(),
+        issue_type: proposal.issue_type.as_deref(),
+        issue_field_values: &proposal.issue_field_values,
+        project_fields: &proposal.project_fields,
+        framework: proposal.framework.as_ref(),
+        provenance: &proposal.provenance,
+    });
+    proposal.digest = submission_digest.clone();
+    Ok(PreparedIssueSubmissionProposal {
+        proposal,
+        draft_digest,
+        submission_digest,
+        target_repo: target_repo.to_string(),
+        recomputed_dedupe,
+    })
 }
 
 fn normalize_issue_title(value: &str) -> String {
@@ -856,6 +1122,10 @@ pub fn validate_issue_submission_policy(
 ) -> Result<(), String> {
     match proposal.dedupe {
         IssueDedupeStatus::Unique => Ok(()),
+        IssueDedupeStatus::Deferred => Err(format!(
+            "proposal {} has deferred dedupe and must be recomputed before tracker submission",
+            proposal.proposal_id.as_str()
+        )),
         IssueDedupeStatus::DuplicateBlocked => Err(format!(
             "proposal {} is duplicate_blocked and cannot be submitted",
             proposal.proposal_id.as_str()
@@ -1073,6 +1343,51 @@ mod tests {
     }
 
     #[test]
+    fn deferred_dedupe_fails_closed_before_submission() {
+        let mut proposal = proposal();
+        proposal.dedupe = IssueDedupeStatus::Deferred;
+
+        let err = validate_issue_submission_policy(&proposal, false, None).unwrap_err();
+
+        assert!(err.contains("deferred dedupe"));
+    }
+
+    #[test]
+    fn prepared_local_submission_binds_target_repo_and_recomputes_dedupe() {
+        let mut proposal = proposal();
+        proposal.repo = "local:workspace".to_string();
+        proposal.dedupe = IssueDedupeStatus::Deferred;
+        let draft_digest = proposal.digest.clone();
+        let candidates = vec![Issue {
+            id: "owner/repo#44".to_string(),
+            repo: "owner/repo".to_string(),
+            number: 44,
+            title: "unrelated".to_string(),
+            body: String::new(),
+            state: "open".to_string(),
+            author: "octocat".to_string(),
+            labels: Vec::new(),
+            created_at: None,
+            updated_at: None,
+            is_pull_request: false,
+            html_url: None,
+            source_artifact: None,
+        }];
+
+        let prepared =
+            prepare_issue_submission_proposal(proposal, "owner/repo".to_string(), &candidates)
+                .unwrap();
+
+        assert_eq!(prepared.draft_digest, draft_digest);
+        assert_eq!(prepared.target_repo, "owner/repo");
+        assert_eq!(prepared.recomputed_dedupe, IssueDedupeStatus::Unique);
+        assert_eq!(prepared.proposal.repo, "owner/repo");
+        assert_eq!(prepared.proposal.dedupe, IssueDedupeStatus::Unique);
+        assert_eq!(prepared.proposal.digest, prepared.submission_digest);
+        assert_ne!(prepared.submission_digest, prepared.draft_digest);
+    }
+
+    #[test]
     fn prompt_drafting_excludes_raw_prompt_from_body_and_digest_inputs() {
         let prompt = "SECRET=abc123\nBuild an admin dashboard";
         let result = draft_issue_proposals(IssueDraftRequest {
@@ -1085,6 +1400,7 @@ mod tests {
                 id: "nextjs".to_string(),
                 version_or_profile: None,
             }),
+            domain: None,
             stack: Some("typescript".to_string()),
             candidates: Vec::new(),
             query: agentactr_core::CandidateQuery::default(),
@@ -1117,6 +1433,7 @@ mod tests {
                 id: "nextjs".to_string(),
                 version_or_profile: None,
             }),
+            domain: None,
             stack: Some("typescript".to_string()),
             candidates: Vec::new(),
             query: agentactr_core::CandidateQuery::default(),
@@ -1166,6 +1483,7 @@ mod tests {
                     id: "nextjs".to_string(),
                     version_or_profile: None,
                 }),
+                domain: None,
                 stack: Some("typescript".to_string()),
                 candidates: vec![Issue {
                     id: "owner/repo#9".to_string(),
@@ -1223,6 +1541,7 @@ mod tests {
                 parent_issue: None,
                 prompt: Some("work".to_string()),
                 framework: None,
+                domain: None,
                 stack: Some("typescript".to_string()),
                 candidates: Vec::new(),
                 query: agentactr_core::CandidateQuery::default(),

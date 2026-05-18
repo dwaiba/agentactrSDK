@@ -9,7 +9,9 @@ mod linux_memory;
 mod mcp_command;
 mod quality_command;
 mod setup_commands;
+mod terminal;
 mod trace_command;
+mod tui_command;
 mod vcs_adapter;
 mod vcs_commands;
 
@@ -86,12 +88,14 @@ use trace_command::latest_run_status;
 use trace_command::{cmd_trace, latest_run_statuses, read_trace_records};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+use tui_command::cmd_tui;
 use vcs_adapter::LocalGitAdapter;
 #[cfg(test)]
 use vcs_commands::apply_recorded_patch;
 use vcs_commands::cmd_vcs;
 
 const CODEX_AUTH_VALUES: &[&str] = &["auto", "chatgpt", "api-key"];
+const COLOR_VALUES: &[&str] = &["auto", "always", "never"];
 const AUTH_CODEX_METHOD_VALUES: &[&str] = &["chatgpt", "subscription", "api-key"];
 const HUMAN_INTERVENTION_VALUES: &[&str] = &["fail-closed", "interactive", "review-required"];
 const CODEX_APPROVAL_VALUES: &[&str] = &["never", "on-request"];
@@ -285,6 +289,14 @@ struct CliArgs {
 )]
 #[command(about = "Run agentactr issue automation and inspect local run artifacts.")]
 pub(crate) struct AgentactrHelpCli {
+    #[arg(
+        long,
+        value_name = "auto|always|never",
+        value_parser = static_value_parser(COLOR_VALUES),
+        global = true,
+        help = "Control ANSI color for human output."
+    )]
+    color: Option<String>,
     #[command(subcommand)]
     command: Option<AgentactrHelpCommand>,
 }
@@ -324,6 +336,8 @@ enum AgentactrHelpCommand {
     Daemon(DaemonHelpArgs),
     #[command(subcommand, about = "Inspect the local run trace ledger.")]
     Trace(TraceHelpCommand),
+    #[command(subcommand, about = "Render read-only agent run visibility views.")]
+    Tui(TuiHelpCommand),
     #[command(subcommand, about = "Create local debug bundles.")]
     Debug(DebugHelpCommand),
     #[command(about = "Rebuild run state from trace/artifacts. Milestone command.")]
@@ -533,7 +547,9 @@ struct IssueFindHelpArgs {
 #[derive(Debug, Args)]
 struct IssueDraftHelpArgs {
     #[arg(long, value_name = "OWNER/REPO")]
-    repo: String,
+    repo: Option<String>,
+    #[arg(long, help = "Draft tracker-offline local issue proposals.")]
+    local: bool,
     #[arg(long, value_name = "TEXT")]
     prompt: Option<String>,
     #[arg(long, value_name = "PATH")]
@@ -542,6 +558,8 @@ struct IssueDraftHelpArgs {
     stack: Option<String>,
     #[arg(long, value_name = "nextjs|none")]
     framework: Option<String>,
+    #[arg(long, value_name = "DOMAIN")]
+    domain: Option<String>,
     #[arg(long, value_name = "ISSUE_NUMBER")]
     parent: Option<u64>,
     #[arg(long, value_name = "PATH")]
@@ -568,6 +586,8 @@ struct IssueSubmitHelpArgs {
     issue_set_id: String,
     #[arg(long, value_name = "PROPOSAL_ID")]
     proposal: String,
+    #[arg(long, value_name = "OWNER/REPO")]
+    repo: Option<String>,
     #[arg(long)]
     resume: bool,
     #[arg(long)]
@@ -646,6 +666,34 @@ enum TraceHelpCommand {
     List,
     #[command(about = "Show a run-scoped trace timeline and artifact integrity summary.")]
     Show(RunIdHelpArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum TuiHelpCommand {
+    #[command(about = "Render a read-only run visibility snapshot or refreshing terminal view.")]
+    Run(TuiRunHelpArgs),
+    #[command(about = "Resolve the latest run from trace timestamps and render it read-only.")]
+    Latest(TuiLatestHelpArgs),
+}
+
+#[derive(Debug, Args)]
+struct TuiRunHelpArgs {
+    #[arg(value_name = "RUN_ID")]
+    run_id: String,
+    #[arg(long, value_name = "DURATION")]
+    refresh: Option<String>,
+    #[arg(long, help = "Render deterministic non-interactive text.")]
+    snapshot: bool,
+    #[arg(long, help = "Disable ANSI color for this TUI command.")]
+    no_color: bool,
+}
+
+#[derive(Debug, Args)]
+struct TuiLatestHelpArgs {
+    #[arg(long, value_name = "DURATION")]
+    refresh: Option<String>,
+    #[arg(long, help = "Disable ANSI color for this TUI command.")]
+    no_color: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -830,6 +878,8 @@ fn run() -> Result<(), String> {
     let mut args = CliArgs::try_parse()
         .map(|cli| cli.args)
         .unwrap_or_else(|_| env::args().skip(1).collect::<Vec<_>>());
+    let color_mode = terminal::parse_global_color(&mut args)?;
+    terminal::set_color_mode(color_mode);
     if let Some(help_path) = generated_help_path(&args) {
         print_generated_help(&help_path)?;
         return Ok(());
@@ -846,6 +896,7 @@ fn run() -> Result<(), String> {
         Some("issue") => cmd_issue(&mut args),
         Some("daemon") => not_implemented("daemon"),
         Some("trace") => cmd_trace(&mut args),
+        Some("tui") => cmd_tui(&mut args),
         Some("debug") => cmd_debug(&mut args),
         Some("replay") => not_implemented("replay"),
         Some("merge") => cmd_merge(&mut args),
@@ -896,9 +947,9 @@ Implemented bootstrap commands:
   bootstrap project --stack python|golang|rust|typescript|pulumi|terraform|sql --yes [--force] [--allow-non-empty]
   run issue --repo OWNER/REPO --issue 123 [--human-intervention fail-closed|interactive|review-required] [--codex-approval never|on-request] [--github-finalization automatic_after_quality_gates|require_human_review|disabled] [--dry-run]
   issue find --repo OWNER/REPO [--query TEXT] [--state open|closed|all] [--limit N] [--json]
-  issue draft --repo OWNER/REPO [--prompt TEXT|--prompt-file PATH] --stack STACK [--framework nextjs|none] [--codex-draft] [--codex-review] [--json]
+  issue draft (--repo OWNER/REPO|--local) [--prompt TEXT|--prompt-file PATH] --stack STACK [--framework nextjs|none] [--domain DOMAIN] [--codex-draft] [--codex-review] [--json]
   issue proposals ISSUE_SET_ID
-  issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--resume] [--require-codex-review]
+  issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--repo OWNER/REPO for local issue sets] [--resume] [--require-codex-review]
   issue mark ISSUE_SET_ID --proposal PROPOSAL_ID --dedupe unique|duplicate_blocked --reason TEXT
   repo inspect
   quality plan
@@ -912,6 +963,8 @@ Implemented bootstrap commands:
   merge plan RUN_ID [--json]
   trace list
   trace show RUN_ID
+  tui run RUN_ID [--refresh 1s] [--snapshot] [--no-color]
+  tui latest [--refresh 1s] [--no-color]
   debug bundle RUN_ID
   memory status
   memory pressure
@@ -8016,11 +8069,12 @@ fallback_mode = "cli_json"
     #[test]
     fn clap_help_tree_renders_top_level_and_nested_commands() {
         let top = render_generated_help(&[]).unwrap();
-        assert!(top.contains("Usage: agentactr [COMMAND]"));
+        assert!(top.contains("Usage: agentactr [OPTIONS] [COMMAND]"));
         assert!(top.contains("Commands:"));
         assert!(top.contains("run"));
         assert!(top.contains("bootstrap"));
         assert!(top.contains("vcs"));
+        assert!(top.contains("tui"));
         assert!(top.contains("completions"));
         assert!(top.contains("docs"));
 

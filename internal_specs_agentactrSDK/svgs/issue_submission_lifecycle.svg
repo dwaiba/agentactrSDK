@@ -1,70 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="420" viewBox="0 0 1180 420" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="430" viewBox="0 0 1180 430" role="img" aria-labelledby="title desc">
   <title id="title">Review-gated issue proposal submission lifecycle</title>
-  <desc id="desc">Shows read-only issue drafting and review, SDK ledger idempotency, GitHub create-then-link mutation, and recovery states.</desc>
-  <style>
-    .box { fill:#f8fafc; stroke:#334155; stroke-width:1.4; rx:8; }
-    .mut { fill:#fff7ed; stroke:#c2410c; stroke-width:1.4; rx:8; }
-    .safe { fill:#ecfdf5; stroke:#047857; stroke-width:1.4; rx:8; }
-    .warn { fill:#fefce8; stroke:#a16207; stroke-width:1.4; rx:8; }
-    .text { font-family:Arial, sans-serif; font-size:15px; fill:#0f172a; }
-    .small { font-family:Arial, sans-serif; font-size:12px; fill:#334155; }
-    .arrow { stroke:#334155; stroke-width:1.5; fill:none; marker-end:url(#arrow); }
-  </style>
-  <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
-    </marker>
-  </defs>
-  <rect x="30" y="40" width="170" height="82" class="box"/>
-  <text x="48" y="72" class="text">issue find/draft</text>
-  <text x="48" y="96" class="small">read-only inventory</text>
-  <text x="48" y="112" class="small">local issue-set artifacts</text>
-
-  <rect x="250" y="40" width="190" height="82" class="safe"/>
-  <text x="268" y="72" class="text">optional Codex draft</text>
-  <text x="268" y="96" class="small">read-only sandbox</text>
-  <text x="268" y="112" class="small">schema-validated JSON</text>
-
-  <rect x="490" y="40" width="190" height="82" class="safe"/>
-  <text x="508" y="72" class="text">optional Codex review</text>
-  <text x="508" y="96" class="small">APPROVED required only</text>
-  <text x="508" y="112" class="small">when submit requires it</text>
-
-  <rect x="730" y="40" width="180" height="82" class="warn"/>
-  <text x="748" y="72" class="text">human review gate</text>
-  <text x="748" y="96" class="small">--yes required</text>
-  <text x="748" y="112" class="small">duplicate policy checked</text>
-
-  <rect x="960" y="40" width="185" height="82" class="mut"/>
-  <text x="978" y="72" class="text">GitHub mutation</text>
-  <text x="978" y="96" class="small">create normal issue</text>
-  <text x="978" y="112" class="small">then link if parented</text>
-
-  <rect x="360" y="220" width="210" height="118" class="box"/>
-  <text x="382" y="252" class="text">SDK ledger key</text>
-  <text x="382" y="278" class="small">issue_set_id</text>
-  <text x="382" y="294" class="small">proposal_id, repo</text>
-  <text x="382" y="310" class="small">parent_issue_key</text>
-  <text x="382" y="326" class="small">proposal_digest</text>
-
-  <rect x="640" y="220" width="245" height="118" class="box"/>
-  <text x="662" y="252" class="text">ledger states</text>
-  <text x="662" y="278" class="small">pending -&gt; submitted -&gt; created</text>
-  <text x="662" y="294" class="small">linked | created_unlinked</text>
-  <text x="662" y="310" class="small">created_metadata_mismatch</text>
-  <text x="662" y="326" class="small">failed</text>
-
-  <rect x="950" y="220" width="195" height="118" class="box"/>
-  <text x="972" y="252" class="text">resume recovery</text>
-  <text x="972" y="278" class="small">marker search only after</text>
-  <text x="972" y="294" class="small">uncertain submitted state</text>
-  <text x="972" y="310" class="small">no duplicate create</text>
-
-  <path d="M200 81 H250" class="arrow"/>
-  <path d="M440 81 H490" class="arrow"/>
-  <path d="M680 81 H730" class="arrow"/>
-  <path d="M910 81 H960" class="arrow"/>
-  <path d="M820 122 V180 H465 V220" class="arrow"/>
-  <path d="M570 279 H640" class="arrow"/>
-  <path d="M885 279 H950" class="arrow"/>
+  <desc id="desc">Shows tracker-backed and local-only draft modes, deferred dedupe, submit-time target binding, SDK ledger idempotency, GitHub create-then-link mutation, and recovery states.</desc>
+  <style>.box{fill:#f8fafc;stroke:#334155;stroke-width:1.4;rx:8}.mut{fill:#fff7ed;stroke:#c2410c;stroke-width:1.4;rx:8}.safe{fill:#ecfdf5;stroke:#047857;stroke-width:1.4;rx:8}.warn{fill:#fefce8;stroke:#a16207;stroke-width:1.4;rx:8}.text{font-family:Arial,sans-serif;font-size:15px;fill:#0f172a}.small{font-family:Arial,sans-serif;font-size:12px;fill:#334155}.arrow{stroke:#334155;stroke-width:1.5;fill:none;marker-end:url(#arrow)}</style>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/></marker></defs>
+  <rect x="30" y="34" width="185" height="82" class="box"/><text x="48" y="66" class="text">tracker-backed draft</text><text x="48" y="90" class="small">GitHub candidates</text><text x="48" y="106" class="small">dedupe before write</text>
+  <rect x="30" y="146" width="185" height="82" class="safe"/><text x="48" y="178" class="text">local-only draft</text><text x="48" y="202" class="small">no tracker adapter</text><text x="48" y="218" class="small">dedupe deferred</text>
+  <rect x="270" y="88" width="190" height="82" class="safe"/><text x="288" y="120" class="text">proposal artifacts</text><text x="288" y="144" class="small">draft_digest stable</text><text x="288" y="160" class="small">template provenance</text>
+  <rect x="510" y="88" width="190" height="82" class="warn"/><text x="528" y="120" class="text">human review gate</text><text x="528" y="144" class="small">--yes required</text><text x="528" y="160" class="small">Codex review optional</text>
+  <rect x="750" y="88" width="185" height="82" class="warn"/><text x="768" y="120" class="text">local submit bind</text><text x="768" y="144" class="small">explicit --repo</text><text x="768" y="160" class="small">recompute dedupe</text>
+  <rect x="985" y="88" width="165" height="82" class="mut"/><text x="1003" y="120" class="text">GitHub mutation</text><text x="1003" y="144" class="small">create issue</text><text x="1003" y="160" class="small">link if parented</text>
+  <rect x="330" y="260" width="220" height="118" class="box"/><text x="352" y="292" class="text">SDK ledger key</text><text x="352" y="318" class="small">issue_set_id</text><text x="352" y="334" class="small">proposal_id, target repo</text><text x="352" y="350" class="small">parent_issue_key</text><text x="352" y="366" class="small">submission_digest</text>
+  <rect x="620" y="260" width="245" height="118" class="box"/><text x="642" y="292" class="text">ledger states</text><text x="642" y="318" class="small">pending -&gt; submitted -&gt; created</text><text x="642" y="334" class="small">linked | created_unlinked</text><text x="642" y="350" class="small">created_metadata_mismatch</text><text x="642" y="366" class="small">failed</text>
+  <rect x="940" y="260" width="210" height="118" class="box"/><text x="962" y="292" class="text">resume recovery</text><text x="962" y="318" class="small">marker search uses</text><text x="962" y="334" class="small">submission_digest</text><text x="962" y="350" class="small">no duplicate create</text>
+  <path d="M215 75 H270" class="arrow"/><path d="M215 187 H240 V129 H270" class="arrow"/><path d="M460 129 H510" class="arrow"/><path d="M700 129 H750" class="arrow"/><path d="M935 129 H985" class="arrow"/><path d="M842 170 V214 H440 V260" class="arrow"/><path d="M550 319 H620" class="arrow"/><path d="M865 319 H940" class="arrow"/>
 </svg>

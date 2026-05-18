@@ -60,7 +60,7 @@ pub(crate) fn cmd_issue(args: &mut [String]) -> Result<(), String> {
         Some("submit") => cmd_issue_submit(args),
         Some("mark") => cmd_issue_mark(args),
         _ => Err(
-            "usage: agentactr issue find --repo OWNER/REPO | agentactr issue draft --repo OWNER/REPO [--prompt TEXT] --stack STACK [--codex-draft] [--codex-review] | agentactr issue proposals ISSUE_SET_ID | agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--resume] [--require-codex-review] | agentactr issue mark ISSUE_SET_ID --proposal PROPOSAL_ID --dedupe unique|duplicate_blocked --reason TEXT"
+            "usage: agentactr issue find --repo OWNER/REPO | agentactr issue draft (--repo OWNER/REPO|--local) [--prompt TEXT] --stack STACK [--domain DOMAIN] [--codex-draft] [--codex-review] | agentactr issue proposals ISSUE_SET_ID | agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--repo OWNER/REPO for local sets] [--resume] [--require-codex-review] | agentactr issue mark ISSUE_SET_ID --proposal PROPOSAL_ID --dedupe unique|duplicate_blocked --reason TEXT"
                 .to_string(),
         ),
     }
@@ -106,11 +106,28 @@ fn cmd_issue_find(args: &mut [String]) -> Result<(), String> {
 }
 
 fn cmd_issue_draft(args: &mut [String]) -> Result<(), String> {
-    let repo = flag_value(args, "--repo").ok_or("missing --repo OWNER/REPO for issue draft")?;
-    validate_github_repo(&repo)?;
-    let mut config = load_agentactr_config(Some(&repo))?;
+    let local_mode = has_flag(args, "--local");
+    let repo_arg = flag_value(args, "--repo");
+    if local_mode && repo_arg.is_some() {
+        return Err("issue draft --local cannot be combined with --repo".to_string());
+    }
+    let repo = if local_mode {
+        format!("local:{}", local_workspace_slug()?)
+    } else {
+        let repo = repo_arg.ok_or("missing --repo OWNER/REPO for issue draft")?;
+        validate_github_repo(&repo)?;
+        repo
+    };
+    let mut config = load_agentactr_config(if local_mode { None } else { Some(&repo) })?;
     apply_issue_artifact_root_override(&mut config, args)?;
-    let query = parse_candidate_query(args, &repo)?;
+    let query = if local_mode {
+        agentactr_sdk::CandidateQuery {
+            repo: repo.clone(),
+            ..agentactr_sdk::CandidateQuery::default()
+        }
+    } else {
+        parse_candidate_query(args, &repo)?
+    };
     let issue_set_id = new_issue_set_id("draft");
     let parent_issue = flag_value(args, "--parent")
         .map(|value| {
@@ -150,8 +167,20 @@ fn cmd_issue_draft(args: &mut [String]) -> Result<(), String> {
         framework.clone(),
         IssueSetSource::Draft,
     )?;
-    let tracker = GithubRestAdapter::new(&context.artifact_dir, &config.tracker);
-    let candidates = tracker.fetch_candidates(query.clone())?;
+    if local_mode {
+        context.draft_mode = agentactr_sdk::IssueDraftMode::LocalOnly;
+        context.tracker_network_required = false;
+        context.submit_requires_repo = true;
+        context.dedupe_deferred = true;
+    }
+    context.planner_network_required =
+        has_flag(args, "--codex-draft") || has_flag(args, "--codex-review");
+    let candidates = if local_mode {
+        Vec::new()
+    } else {
+        let tracker = GithubRestAdapter::new(&context.artifact_dir, &config.tracker);
+        tracker.fetch_candidates(query.clone())?
+    };
     let prompt_artifacts = prompt
         .as_ref()
         .map(|prompt| write_prompt_artifacts(&context, prompt))
@@ -167,6 +196,7 @@ fn cmd_issue_draft(args: &mut [String]) -> Result<(), String> {
         parent_issue,
         prompt: prompt.as_ref().map(|prompt| redact_prompt(prompt)),
         framework: framework.clone(),
+        domain: flag_value(args, "--domain"),
         stack: stack.clone(),
         candidates: candidates.clone(),
         query,
@@ -186,7 +216,7 @@ fn cmd_issue_draft(args: &mut [String]) -> Result<(), String> {
     } else {
         None
     };
-    let draft = if let Some(codex_draft) = codex_draft.as_ref() {
+    let mut draft = if let Some(codex_draft) = codex_draft.as_ref() {
         agentactr_sdk::draft_issue_proposals_from_structured_json(
             draft_request,
             &fs::read_to_string(&codex_draft.response_path).map_err(|e| {
@@ -201,6 +231,9 @@ fn cmd_issue_draft(args: &mut [String]) -> Result<(), String> {
         let planner = agentactr_sdk::DeterministicIssueDraftPlanner;
         planner.draft(draft_request)?
     };
+    if local_mode {
+        apply_local_draft_policy(&mut draft.proposals, &repo);
+    }
     let codex_review = if has_flag(args, "--codex-review") {
         Some(run_codex_issue_draft_review(
             &config,
@@ -224,7 +257,9 @@ fn cmd_issue_draft(args: &mut [String]) -> Result<(), String> {
     write_issue_candidates(&context, &candidates)?;
     write_issue_proposals(&context, &draft.proposals)?;
     write_issue_dedupe_report(&context, &draft.proposals, &candidates)?;
-    materialize_issue_submission_pending(&config, &context.issue_set_id, &draft.proposals)?;
+    if !local_mode {
+        materialize_issue_submission_pending(&config, &context.issue_set_id, &draft.proposals)?;
+    }
     if has_flag(args, "--json") {
         println!(
             "{}",
@@ -233,6 +268,10 @@ fn cmd_issue_draft(args: &mut [String]) -> Result<(), String> {
                 "artifact_dir": context.artifact_dir,
                 "candidate_count": candidates.len(),
                 "proposal_count": draft.proposals.len(),
+                "draft_mode": context.draft_mode.as_str(),
+                "tracker_network_required": context.tracker_network_required,
+                "planner_network_required": context.planner_network_required,
+                "submit_requires_repo": context.submit_requires_repo,
                 "manifest_path": context.manifest_path,
                 "proposals_path": context.proposals_path,
                 "planner_prompt_path": context.planner_prompt_path,
@@ -247,6 +286,16 @@ fn cmd_issue_draft(args: &mut [String]) -> Result<(), String> {
     } else {
         println!("issue_set_id={}", context.issue_set_id);
         println!("artifact_dir={}", context.artifact_dir.display());
+        println!("draft_mode={}", context.draft_mode.as_str());
+        println!(
+            "tracker_network_required={}",
+            context.tracker_network_required
+        );
+        println!(
+            "planner_network_required={}",
+            context.planner_network_required
+        );
+        println!("submit_requires_repo={}", context.submit_requires_repo);
         println!("candidate_count={}", candidates.len());
         println!("proposal_count={}", draft.proposals.len());
         if let Some(artifacts) = prompt_artifacts {
@@ -264,6 +313,14 @@ fn cmd_issue_draft(args: &mut [String]) -> Result<(), String> {
     Ok(())
 }
 
+fn apply_local_draft_policy(proposals: &mut [IssueProposal], repo: &str) {
+    for proposal in proposals {
+        proposal.repo = repo.to_string();
+        proposal.dedupe = agentactr_sdk::IssueDedupeStatus::Deferred;
+        proposal.related_issues.clear();
+    }
+}
+
 fn cmd_issue_submit(args: &mut [String]) -> Result<(), String> {
     let issue_set_id = args.get(2).ok_or(
         "usage: agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--resume] [--require-codex-review]",
@@ -278,9 +335,10 @@ fn cmd_issue_submit(args: &mut [String]) -> Result<(), String> {
     let resume = has_flag(args, "--resume");
     let allow_possible_duplicate = has_flag(args, "--allow-possible-duplicate");
     let duplicate_reason = flag_value(args, "--reason");
-    let config = load_agentactr_config(None)?;
+    let submit_repo = flag_value(args, "--repo");
+    let mut config = load_agentactr_config(None)?;
     let context = load_issue_set_context(&config, issue_set_id)?;
-    let proposal = load_issue_proposals(&context)?
+    let mut proposal = load_issue_proposals(&context)?
         .into_iter()
         .find(|proposal| proposal.proposal_id.as_str() == proposal_id)
         .ok_or_else(|| {
@@ -291,6 +349,31 @@ fn cmd_issue_submit(args: &mut [String]) -> Result<(), String> {
         })?;
     if has_flag(args, "--require-codex-review") {
         require_codex_review_for_proposal(&context, &proposal_id)?;
+    }
+    if context.draft_mode == agentactr_sdk::IssueDraftMode::LocalOnly {
+        let target_repo = submit_repo
+            .filter(|repo| !repo.trim().is_empty())
+            .ok_or("local issue submit requires explicit --repo OWNER/REPO")?;
+        if target_repo.starts_with("local:")
+            || target_repo.contains('<')
+            || target_repo.contains('>')
+        {
+            return Err("local issue submit requires a concrete OWNER/REPO target, not a placeholder or local repo".to_string());
+        }
+        validate_github_repo(&target_repo)?;
+        config.tracker.repo = target_repo.clone();
+        let query = parse_candidate_query(args, &target_repo)?;
+        let tracker = GithubRestAdapter::new(&context.artifact_dir, &config.tracker);
+        let candidates = tracker.fetch_candidates(query)?;
+        let prepared = agentactr_sdk::prepare_issue_submission_proposal(
+            proposal,
+            target_repo.clone(),
+            &candidates,
+        )?;
+        write_issue_submit_target_report(&context, &prepared, &candidates)?;
+        proposal = prepared.proposal;
+    } else if submit_repo.is_some() {
+        return Err("--repo is only supported when submitting a local issue set".to_string());
     }
     agentactr_sdk::validate_issue_submission_policy(
         &proposal,
@@ -711,6 +794,12 @@ fn run_artifact_as_issue_set(run: &RunArtifactContext) -> IssueSetArtifactContex
         dedupe_report_path: run.artifact_dir.join("issue_dedupe_report.json"),
         planner_prompt_path: None,
         planner_metadata_path: None,
+        draft_mode: agentactr_sdk::IssueDraftMode::TrackerBacked,
+        tracker_network_required: true,
+        planner_network_required: false,
+        submit_requires_repo: false,
+        submit_target_repo: None,
+        dedupe_deferred: false,
         trace_path: run.artifact_dir.join("trace.issue_set.jsonl"),
     }
 }
@@ -773,6 +862,31 @@ fn load_issue_set_manifest_context(
             .get("parent_issue")
             .and_then(serde_json::Value::as_u64),
         framework: manifest.get("framework").and_then(parse_framework_value),
+        draft_mode: manifest
+            .get("draft_mode")
+            .and_then(serde_json::Value::as_str)
+            .map(agentactr_sdk::IssueDraftMode::parse)
+            .unwrap_or_default(),
+        tracker_network_required: manifest
+            .get("tracker_network_required")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true),
+        planner_network_required: manifest
+            .get("planner_network_required")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        submit_requires_repo: manifest
+            .get("submit_requires_repo")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        submit_target_repo: manifest
+            .get("submit_target_repo")
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string),
+        dedupe_deferred: manifest
+            .get("dedupe_deferred")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
         artifact_dir: artifact_dir.clone(),
         manifest_path,
         candidates_path: artifact_dir.join("issue_candidates.json"),
@@ -818,6 +932,12 @@ pub(crate) fn create_issue_set_context(
         repo: repo.to_string(),
         parent_issue,
         framework,
+        draft_mode: agentactr_sdk::IssueDraftMode::TrackerBacked,
+        tracker_network_required: true,
+        planner_network_required: false,
+        submit_requires_repo: false,
+        submit_target_repo: None,
+        dedupe_deferred: false,
         manifest_path: artifact_dir.join("issue_set_manifest.json"),
         candidates_path: artifact_dir.join("issue_candidates.json"),
         proposals_path: artifact_dir.join("issue_proposals.json"),
@@ -848,6 +968,12 @@ pub(crate) fn write_issue_set_manifest(
         "parent_issue": context.parent_issue,
         "stack": stack,
         "framework": context.framework.as_ref().map(framework_to_json),
+        "draft_mode": context.draft_mode.as_str(),
+        "tracker_network_required": context.tracker_network_required,
+        "planner_network_required": context.planner_network_required,
+        "submit_requires_repo": context.submit_requires_repo,
+        "submit_target_repo": context.submit_target_repo,
+        "dedupe_deferred": context.dedupe_deferred,
         "candidates_path": context.candidates_path,
         "proposals_path": context.proposals_path,
         "dedupe_report_path": context.dedupe_report_path,
@@ -875,6 +1001,8 @@ fn write_issue_candidates(
     let value = serde_json::json!({
         "issue_set_id": context.issue_set_id,
         "repo": context.repo,
+        "fetch_status": if context.draft_mode == agentactr_sdk::IssueDraftMode::LocalOnly { "not_fetched" } else { "fetched" },
+        "reason": if context.draft_mode == agentactr_sdk::IssueDraftMode::LocalOnly { Some("not_fetched_local_draft") } else { None },
         "candidate_count": candidates.len(),
         "candidates": items,
     });
@@ -960,6 +1088,32 @@ fn write_issue_dedupe_report_mark(
         &context.dedupe_report_path,
         &serde_json::to_string_pretty(&value)
             .map_err(|e| format!("render issue dedupe report: {e}"))?,
+    )
+}
+
+fn write_issue_submit_target_report(
+    context: &IssueSetArtifactContext,
+    prepared: &agentactr_sdk::PreparedIssueSubmissionProposal,
+    candidates: &[agentactr_sdk::Issue],
+) -> Result<(), String> {
+    let path = context.artifact_dir.join("issue_submit_target.json");
+    let value = serde_json::json!({
+        "issue_set_id": context.issue_set_id,
+        "proposal_id": prepared.proposal.proposal_id.as_str(),
+        "draft_mode": context.draft_mode.as_str(),
+        "draft_repo": context.repo,
+        "target_repo": prepared.target_repo,
+        "draft_digest": prepared.draft_digest,
+        "submission_digest": prepared.submission_digest,
+        "recomputed_dedupe": prepared.recomputed_dedupe.as_str(),
+        "candidate_source": "github_submit_time",
+        "candidate_count": candidates.len(),
+        "related_issues": prepared.proposal.related_issues.iter().map(|id| id.0.clone()).collect::<Vec<_>>(),
+    });
+    write_file(
+        path,
+        &serde_json::to_string_pretty(&value)
+            .map_err(|e| format!("render issue submit target report: {e}"))?,
     )
 }
 
@@ -1813,6 +1967,7 @@ fn parse_issue_dedupe(value: &serde_json::Value) -> agentactr_sdk::IssueDedupeSt
     {
         Some("duplicate_blocked") => agentactr_sdk::IssueDedupeStatus::DuplicateBlocked,
         Some("possible_duplicate") => agentactr_sdk::IssueDedupeStatus::PossibleDuplicate,
+        Some("deferred") => agentactr_sdk::IssueDedupeStatus::Deferred,
         _ => agentactr_sdk::IssueDedupeStatus::Unique,
     }
 }
@@ -1854,6 +2009,31 @@ fn framework_to_json(framework: &agentactr_sdk::FrameworkDeclaration) -> serde_j
 
 fn new_issue_set_id(kind: &str) -> String {
     new_run_id(kind)
+}
+
+fn local_workspace_slug() -> Result<String, String> {
+    let cwd = std::env::current_dir().map_err(|e| format!("resolve current directory: {e}"))?;
+    let name = cwd
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or("current directory has no valid UTF-8 workspace name")?;
+    let slug = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if slug.is_empty() {
+        Err("current directory cannot be converted to a local workspace slug".to_string())
+    } else {
+        Ok(slug)
+    }
 }
 
 fn ensure_issue_proposal_capabilities(
@@ -2364,5 +2544,44 @@ fn parse_issue_submission_state(value: &str) -> Result<IssueSubmissionLedgerStat
         "created_metadata_mismatch" => Ok(IssueSubmissionLedgerState::CreatedMetadataMismatch),
         "failed" => Ok(IssueSubmissionLedgerState::Failed),
         _ => Err(format!("unknown issue submission ledger state `{value}`")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_draft_policy_does_not_mutate_digest_inputs() {
+        let mut proposals = vec![IssueProposal {
+            proposal_id: IssueProposalId::new("proposal-1"),
+            repo: "local:workspace".to_string(),
+            parent_issue: None,
+            title: "Add a focused task".to_string(),
+            body: "Body".to_string(),
+            labels: vec!["enhancement".to_string()],
+            assignees: Vec::new(),
+            milestone: None,
+            issue_type: None,
+            issue_field_values: Vec::new(),
+            project_fields: Vec::new(),
+            digest: "draft-digest".to_string(),
+            dedupe: agentactr_sdk::IssueDedupeStatus::Unique,
+            framework: None,
+            related_issues: vec![IssueId("owner/repo#7".to_string())],
+            provenance: vec!["planner:test".to_string()],
+        }];
+        let original_digest = proposals[0].digest.clone();
+        let original_provenance = proposals[0].provenance.clone();
+
+        apply_local_draft_policy(&mut proposals, "local:workspace");
+
+        assert_eq!(proposals[0].digest, original_digest);
+        assert_eq!(proposals[0].provenance, original_provenance);
+        assert_eq!(
+            proposals[0].dedupe,
+            agentactr_sdk::IssueDedupeStatus::Deferred
+        );
+        assert!(proposals[0].related_issues.is_empty());
     }
 }

@@ -21,8 +21,9 @@ pub use domains::{
 pub use issue_submission::{
     draft_issue_proposals, draft_issue_proposals_from_structured_json, issue_submission_key,
     parent_issue_key, plan_issue_submission, plan_issue_submission_begin,
-    validate_issue_submission_policy, DeterministicIssueDraftPlanner, IssueSubmissionBeginDecision,
-    IssueSubmissionDecision,
+    prepare_issue_submission_proposal, validate_issue_submission_policy,
+    DeterministicIssueDraftPlanner, IssueSubmissionBeginDecision, IssueSubmissionDecision,
+    PreparedIssueSubmissionProposal,
 };
 pub use render::{
     annotate_agentactr_toml_possible_values, render_agentactr_toml, render_agents_md,

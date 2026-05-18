@@ -108,7 +108,7 @@ Default runtime adapter: Codex `exec --json` / feature-gated Codex app-server
 Default tracker: GitHub Issues and Pull Requests  
 Default product implementation: Rust CLI named `agentactr`; daemon mode is specified but not part of the current bootstrap  
 Primary non-functional focus: Linux userspace memory control, traceability, debugging, and replayable state.
-Implementation phase: bootstrap SDK and default Rust CLI. The current repository keeps default Git, GitHub, Linux memory, SQLite, command templates, and quality-gate implementations inside `agentactr-cli` while their public SDK contracts stabilize, but the default Codex runtime adapter is extracted into `agentactr-codex`, the local Git implementation is isolated in the CLI-local `vcs_adapter` module, VCS operator dispatch is isolated in the CLI-local `vcs_commands` module, setup/config/auth/doctor dispatch and AGENTS generation helpers are isolated in the CLI-local `setup_commands` module, issue planning/submission dispatch, issue-set artifacts, Codex issue draft/review artifacts, dedupe, and issue-submission ledger helpers are isolated in the CLI-local `issue_commands` module, quality command dispatch and quality-gate process execution are isolated in the CLI-local `quality_command` module, bootstrap project scaffolding is isolated in the CLI-local `bootstrap_project` command module, command inventory/menu rendering is isolated in the CLI-local `command_catalog` module, CLI documentation rendering is isolated in the CLI-local `docs_command` module, MCP stdio serving is isolated in the CLI-local `mcp_command` module, trace inspection is isolated in the CLI-local `trace_command` module, debug bundle creation is isolated in the CLI-local `debug_bundle` module, and artifact integrity verification is isolated in the CLI-local `artifacts` module for trace/debug consumers. Focused CLI command modules must import explicit dependencies rather than `use crate::*`, so wiring dependencies remain reviewable at each module boundary. Any remaining CLI-local adapters and command modules are packaging shortcuts only; the logical SOLID boundaries in this document are still mandatory and must be visible in the types, requests, events, and adapter seams.
+Implementation phase: bootstrap SDK and default Rust CLI. The current repository keeps default Git, GitHub, Linux memory, SQLite, command templates, and quality-gate implementations inside `agentactr-cli` while their public SDK contracts stabilize, but the default Codex runtime adapter is extracted into `agentactr-codex`, the local Git implementation is isolated in the CLI-local `vcs_adapter` module, VCS operator dispatch is isolated in the CLI-local `vcs_commands` module, setup/config/auth/doctor dispatch and AGENTS generation helpers are isolated in the CLI-local `setup_commands` module, issue planning/submission dispatch, issue-set artifacts, Codex issue draft/review artifacts, dedupe, and issue-submission ledger helpers are isolated in the CLI-local `issue_commands` module, quality command dispatch and quality-gate process execution are isolated in the CLI-local `quality_command` module, bootstrap project scaffolding is isolated in the CLI-local `bootstrap_project` command module, command inventory/menu rendering is isolated in the CLI-local `command_catalog` module, CLI documentation rendering is isolated in the CLI-local `docs_command` module, MCP stdio serving is isolated in the CLI-local `mcp_command` module, trace inspection is isolated in the CLI-local `trace_command` module, read-only run visibility rendering is isolated in the CLI-local `tui_command` module, terminal color policy is isolated in the CLI-local `terminal` module, debug bundle creation is isolated in the CLI-local `debug_bundle` module, and artifact integrity verification is isolated in the CLI-local `artifacts` module for trace/debug consumers. Focused CLI command modules must import explicit dependencies rather than `use crate::*`, so wiring dependencies remain reviewable at each module boundary. Any remaining CLI-local adapters and command modules are packaging shortcuts only; the logical SOLID boundaries in this document are still mandatory and must be visible in the types, requests, events, and adapter seams.
 
 ## 1. Purpose
 
@@ -362,9 +362,9 @@ agentactr bootstrap project --stack python|golang|rust|typescript|pulumi|terrafo
 agentactr mcp serve
 agentactr run issue --repo OWNER/REPO --issue 123 [--human-intervention fail-closed|interactive|review-required] [--codex-approval never|on-request] [--github-finalization automatic_after_quality_gates|require_human_review|disabled] [--dry-run]
 agentactr issue find --repo OWNER/REPO [--query TEXT] [--state open|closed|all] [--label LABEL...] [--assignee USER|none|*] [--author USER] [--since ISO8601] [--sort created|updated|comments] [--direction asc|desc] [--page N] [--per-page N] [--limit N] [--artifact-root PATH] [--include-pull-requests] [--json]
-agentactr issue draft --repo OWNER/REPO [--prompt TEXT|--prompt-file PATH] --stack rust|typescript|golang|python [--framework nextjs|none] [--parent ISSUE_NUMBER] [--artifact-root PATH] [--codex-draft] [--codex-review] [--json]
+agentactr issue draft (--repo OWNER/REPO|--local) [--prompt TEXT|--prompt-file PATH] --stack rust|typescript|golang|python [--framework nextjs|none] [--domain DOMAIN] [--parent ISSUE_NUMBER] [--artifact-root PATH] [--codex-draft] [--codex-review] [--json]
 agentactr issue proposals ISSUE_SET_ID
-agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--resume] [--allow-possible-duplicate --reason REASON] [--require-codex-review]
+agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --yes [--repo OWNER/REPO for local issue sets] [--resume] [--allow-possible-duplicate --reason REASON] [--require-codex-review]
 agentactr issue mark ISSUE_SET_ID --proposal PROPOSAL_ID --dedupe unique|duplicate_blocked --reason REASON
 agentactr repo inspect
 agentactr quality plan
@@ -378,6 +378,9 @@ agentactr vcs apply RUN_ID --check|--yes [--3way] [--allow-dirty]
 agentactr merge plan RUN_ID [--json]
 agentactr trace list
 agentactr trace show RUN_ID
+agentactr --color auto tui run RUN_ID --snapshot
+agentactr tui run RUN_ID [--refresh 1s] [--snapshot] [--no-color]
+agentactr tui latest [--refresh 1s] [--no-color]
 agentactr debug bundle RUN_ID
 agentactr memory status
 agentactr memory pressure
@@ -399,7 +402,7 @@ agentactr eval swe-bench --subset verified-smoke
 
 The SDK must expose use cases behind implemented orchestration commands before those commands are promoted from milestone help to default help. CLI-only operator commands may inspect local artifacts and render status, but commands that prepare workspaces, run agents, rerun quality gates, finalize, merge, replay, or mutate trackers must either call SDK use cases or be explicitly documented as bootstrap-local until their SDK use case lands. The CLI must not implement durable orchestration by bypassing SDK ports just because a command is invoked directly.
 
-Current bootstrap note: the CLI now has a typed `clap` command tree for top-level and nested generated help while retaining the existing execution dispatcher for backward-compatible command handling. `agentactr help COMMAND [SUBCOMMAND...]`, `agentactr COMMAND --help`, `agentactr completions bash|zsh|fish|powershell|elvish`, and `agentactr docs cli-markdown [--output PATH]` are implemented from that tree for the current command surface. The generated nested help is not yet fully exhaustive against the target schema: detailed config/env precedence, generated artifacts, trace events, fail-closed conditions, and examples remain to be added per command. The CLI also has a bootstrap-static `commands` inventory plus a read-only `menu` navigator, but interactive menu action execution remains pending. Milestone commands may remain visible for roadmap clarity only when they are labeled as not implemented and route to the explicit milestone diagnostic.
+Current bootstrap note: the CLI now has a typed `clap` command tree for top-level and nested generated help while retaining the existing execution dispatcher for backward-compatible command handling. `agentactr help COMMAND [SUBCOMMAND...]`, `agentactr COMMAND --help`, `agentactr completions bash|zsh|fish|powershell|elvish`, and `agentactr docs cli-markdown [--output PATH]` are implemented from that tree for the current command surface. The generated nested help is not yet fully exhaustive against the target schema: detailed config/env precedence, generated artifacts, trace events, fail-closed conditions, and examples remain to be added per command. The CLI also has a bootstrap-static `commands` inventory, a read-only `menu` navigator, top-level `--color auto|always|never`, and a read-only `tui` snapshot/refresh renderer for run artifacts and trace state, but interactive menu action execution remains pending. Milestone commands may remain visible for roadmap clarity only when they are labeled as not implemented and route to the explicit milestone diagnostic.
 
 ### 7.3 HCI and UX Contract
 
@@ -937,7 +940,7 @@ The current bootstrap implementation may keep synchronous traits in `agentactr-c
 - synchronous traits are treated as bootstrap contracts, not stable SDK contracts
 - every bootstrap trait still exposes provider-neutral request/result types
 - marker structs are allowed only when the corresponding command is explicitly milestone-scoped
-- default adapter structs and command-template modules may live in narrow adapter crates such as `agentactr-codex`, or temporarily in focused CLI-private modules such as `agentactr-cli::adapters`, `agentactr-cli::vcs_adapter`, `agentactr-cli::vcs_commands`, `agentactr-cli::setup_commands`, `agentactr-cli::issue_commands`, `agentactr-cli::quality_command`, `agentactr-cli::bootstrap_project`, `agentactr-cli::command_catalog`, `agentactr-cli::docs_command`, `agentactr-cli::mcp_command`, `agentactr-cli::trace_command`, and `agentactr-cli::debug_bundle` while not yet extracted; core and SDK users must not import concrete defaults
+- default adapter structs and command-template modules may live in narrow adapter crates such as `agentactr-codex`, or temporarily in focused CLI-private modules such as `agentactr-cli::adapters`, `agentactr-cli::vcs_adapter`, `agentactr-cli::vcs_commands`, `agentactr-cli::setup_commands`, `agentactr-cli::issue_commands`, `agentactr-cli::quality_command`, `agentactr-cli::bootstrap_project`, `agentactr-cli::command_catalog`, `agentactr-cli::docs_command`, `agentactr-cli::mcp_command`, `agentactr-cli::trace_command`, `agentactr-cli::tui_command`, `agentactr-cli::terminal`, and `agentactr-cli::debug_bundle` while not yet extracted; core and SDK users must not import concrete defaults
 - adapter capability and version reporting must be present even in bootstrap implementations
 - provider-specific strings, raw JSON payloads, command-line flags, HTTP clients, cgroup paths, process IDs, and SQLite handles must not become stable SDK surface
 
@@ -956,7 +959,7 @@ Present implementation snapshot:
 - `agentactr-core` currently exposes blocking traits and keeps marker request/result structs only for commands that remain explicitly milestone-scoped.
 - `AgentIssueRunRequest` currently carries `context_manifest: PathBuf`, an optional provider-neutral `MemoryLease`, and child `AgentMemoryLease` entries for the default CLI runtime bridge; concrete cgroup paths are resolved inside memory/process supervisor adapters.
 - `agentactr-codex` owns the concrete Codex runtime adapter. `agentactr-cli` wires it as the default runtime and supplies a thin Linux-memory supervisor bridge for cgroup attachment.
-- `agentactr-cli` still owns the concrete GitHub, local Git, Linux-memory adapters, default command templates, and operator command catalog and wires them directly; local Git behavior is isolated in `agentactr-cli::vcs_adapter`, VCS operator dispatch is isolated in `agentactr-cli::vcs_commands`, setup/config/auth/doctor dispatch is isolated in `agentactr-cli::setup_commands`, issue planning and submission dispatch is isolated in `agentactr-cli::issue_commands`, quality command execution is isolated in `agentactr-cli::quality_command`, blank-project scaffolding is isolated in `agentactr-cli::bootstrap_project`, command inventory/menu rendering is isolated in `agentactr-cli::command_catalog`, CLI reference rendering is isolated in `agentactr-cli::docs_command`, MCP stdio serving is isolated in `agentactr-cli::mcp_command`, trace inspection is isolated in `agentactr-cli::trace_command`, debug bundle assembly is isolated in `agentactr-cli::debug_bundle`, and artifact integrity verification is isolated in `agentactr-cli::artifacts` to keep HCI, observability, catalog/docs logic, artifact verification, GitHub, runtime, quality, setup, issue, and VCS adapter code separated.
+- `agentactr-cli` still owns the concrete GitHub, local Git, Linux-memory adapters, default command templates, and operator command catalog and wires them directly; local Git behavior is isolated in `agentactr-cli::vcs_adapter`, VCS operator dispatch is isolated in `agentactr-cli::vcs_commands`, setup/config/auth/doctor dispatch is isolated in `agentactr-cli::setup_commands`, issue planning and submission dispatch is isolated in `agentactr-cli::issue_commands`, quality command execution is isolated in `agentactr-cli::quality_command`, blank-project scaffolding is isolated in `agentactr-cli::bootstrap_project`, command inventory/menu rendering is isolated in `agentactr-cli::command_catalog`, CLI reference rendering is isolated in `agentactr-cli::docs_command`, MCP stdio serving is isolated in `agentactr-cli::mcp_command`, trace inspection is isolated in `agentactr-cli::trace_command`, read-only TUI rendering is isolated in `agentactr-cli::tui_command`, terminal color policy is isolated in `agentactr-cli::terminal`, debug bundle assembly is isolated in `agentactr-cli::debug_bundle`, and artifact integrity verification is isolated in `agentactr-cli::artifacts` to keep HCI, observability, catalog/docs logic, artifact verification, GitHub, runtime, quality, setup, issue, and VCS adapter code separated.
 - `agentactr-sdk` currently re-exports core types and provides repository discovery plus config/Codex/MCP rendering helpers.
 
 This snapshot is implementation-shaped, not SDK-stable. Any public API stabilization must replace raw filesystem cgroup paths and provider command details with typed SDK references, leases, and events.
@@ -2095,6 +2098,10 @@ Bootstrap `agentactr trace show RUN_ID` filters the local JSONL event ledger for
 - artifact paths
 - failure chain
 
+![Read-only agent visibility TUI contract](internal_specs_agentactrSDK/svgs/agent_visibility_tui.svg)
+
+Bootstrap `agentactr tui run RUN_ID [--refresh 1s]` and `agentactr tui latest [--refresh 1s]` are CLI/HCI-only renderers. They read `context_manifest.json`, `agent_graph.json`, `spawn_handoffs.json`, trace events, runtime-process artifacts, quality reports, machine-readable quality status, GitHub lifecycle events, and lifecycle/finalization artifacts when present. They render agent graph nodes with event-derived pending, active, complete, failed, blocked, or review state so operators can see who is doing what without reading raw JSONL. They must never orchestrate work, mutate worktrees, mutate SQLite state, call GitHub, call Codex, or change run lifecycle state. `agentactr tui run RUN_ID --snapshot` renders deterministic text for tests and non-interactive environments. `tui latest` must resolve the latest run from trace summaries sorted by `ts_unix_ms`, never artifact directory modification time; if no trace run exists, it must fail with guidance to pass `RUN_ID`. Human output color is controlled by top-level `--color auto|always|never`, by `NO_COLOR`, and by TUI-local `--no-color`; JSON output must never contain ANSI escapes.
+
 `agentactr replay RUN_ID` rebuilds state from JSONL and reports divergence from SQLite.
 
 `agentactr vcs list` prints run id, issue id, branch name, worktree path, base commit, current commit when available, source checkout cleanliness at prepare time, and last known run status for each retained local worktree. The JSON form must be stable enough for menu/UI clients and CI inventory checks.
@@ -2369,12 +2376,12 @@ agentactr config set quality.profile strict
 - Python: Hatch build backend, `uv`, Ruff, Pytest, Pyright, `poetry.toml`, `src/`, and `tests/`.
 - Go: `go.mod`, `cmd/`, `internal/`, tests, `golangci-lint`, and pre-commit hooks.
 - Rust: workspace layout, pinned `rust-toolchain.toml`, declared workspace MSRV, `deny.toml`, tests, and pre-commit hooks modeled after this repository.
-- TypeScript: Bun, Biome, strict TypeScript, tests, and pre-commit hooks.
-- Pulumi: modular TypeScript Pulumi project, local lint/typecheck/test gates, and pre-commit hooks. Live `pulumi preview` is documented as optional because it can require credentials, backend access, and network; it must not be in default pre-commit hooks or printed start commands.
+- TypeScript: Bun, Biome, strict TypeScript, tests, and pre-commit hooks. Fresh scaffolds must use plain `bun install`, not `bun install --frozen-lockfile`, because the scaffold does not generate `bun.lock` before the first install. Generated tests must be compatible with `moduleResolution = "NodeNext"`, including emitted `.js` specifiers for local relative imports.
+- Pulumi: modular TypeScript Pulumi project, local lint/typecheck/test gates, and pre-commit hooks. Fresh scaffolds must use plain `bun install`, not `bun install --frozen-lockfile`, because the scaffold does not generate `bun.lock` before the first install. Live `pulumi preview` is documented as optional because it can require credentials, backend access, and network; it must not be in default pre-commit hooks or printed start commands.
 - Terraform: modular layout, tracked `.terraform.lock.hcl` provider lock policy, `terraform fmt`, `validate`, `test`, and pre-commit hooks.
 - SQL: forward migrations, reviewed rollbacks, backfills, seeds, smoke tests, SQLFluff, and pre-commit hooks.
 
-Local blank-project scaffold/init and tracker-backed issue automation are separate operator workflows. `agentactr init --yes` may render a placeholder tracker repo for local metadata, but `agentactr issue find`, `agentactr issue draft`, `agentactr issue submit`, and `agentactr run issue` require a concrete tracker repository in the current default CLI because issue discovery and drafting fetch tracker inventory for dedupe before any GitHub mutation.
+Local blank-project scaffold/init and tracker-backed issue automation are separate operator workflows. `agentactr init --yes` may render a placeholder tracker repo for local metadata. `agentactr issue draft --local --stack STACK --prompt TEXT` is available for tracker-offline local issue proposal drafting and defers tracker dedupe until `agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --repo OWNER/REPO --yes`. `agentactr issue find`, tracker-backed `agentactr issue draft --repo OWNER/REPO`, local submit, and `agentactr run issue` still require a concrete tracker repository when they fetch or mutate GitHub state.
 
 The default Rust Codex/GitHub CLI must print exact recovery steps when empty repo detection fails:
 
@@ -2690,7 +2697,7 @@ GitHub finalization is an SDK use case, not a Codex prompt and not a remote MCP 
 
 ![Review-gated issue proposal submission lifecycle](internal_specs_agentactrSDK/svgs/issue_submission_lifecycle.svg)
 
-Issue discovery and drafting are distinct from implementation runs. `agentactr issue find` may query the tracker and write issue-set artifacts, but it must not prepare a worktree, launch an implementation agent, or mutate GitHub. `agentactr issue draft` may create local proposals from deterministic repository evidence, deterministic prompt policy, or explicit read-only Codex structured drafting, but it must remain read-only until `agentactr issue submit ... --yes` is invoked. When `--codex-draft` is supplied, the default CLI may run Codex through `codex exec --json` with `--sandbox read-only`, `approval_policy=never`, `--output-schema`, and `--output-last-message` to inspect the current checkout and produce a bounded structured JSON proposal set. The SDK must validate and normalize that structured output into provider-neutral `IssueProposal` values before writing `issue_proposals.json`; invalid, empty, over-limit, repo-mismatched, or parent-mismatched output fails closed and no proposals are materialized. When `--codex-review` is supplied, the default CLI may run a separate Codex read-only review of the local proposal set against the current checkout. Drafting and review must produce explicit artifacts and must not mutate files or GitHub.
+Issue discovery and drafting are distinct from implementation runs. `agentactr issue find` may query the tracker and write issue-set artifacts, but it must not prepare a worktree, launch an implementation agent, or mutate GitHub. `agentactr issue draft` may create local proposals from deterministic repository evidence, deterministic prompt policy, stack/domain-aware templates, or explicit read-only Codex structured drafting, but it must remain read-only until `agentactr issue submit ... --yes` is invoked. Tracker-backed drafting uses `--repo OWNER/REPO`, fetches tracker inventory, and computes dedupe before writing proposals. Tracker-offline drafting uses `--local`, must not construct or call the GitHub adapter, writes an empty candidate artifact with `reason = "not_fetched_local_draft"`, stores proposals under `repo = "local:<workspace_slug>"`, and records `dedupe = deferred`. When `--codex-draft` is supplied, the default CLI may run Codex through `codex exec --json` with `--sandbox read-only`, `approval_policy=never`, `--output-schema`, and `--output-last-message` to inspect the current checkout and produce a bounded structured JSON proposal set. The SDK must validate and normalize that structured output into provider-neutral `IssueProposal` values before writing `issue_proposals.json`; invalid, empty, over-limit, repo-mismatched, or parent-mismatched output fails closed and no proposals are materialized. When `--codex-review` is supplied, the default CLI may run a separate Codex read-only review of the local proposal set against the current checkout. Drafting and review must produce explicit artifacts and must not mutate files or GitHub.
 
 Issue-set artifacts are independent of run artifacts and local Git repositories. An `IssueSetArtifactContext` must include:
 
@@ -2704,6 +2711,12 @@ Issue-set artifacts are independent of run artifacts and local Git repositories.
 - `repo`
 - optional `parent_issue`
 - optional `framework` as `FrameworkDeclaration`
+- `draft_mode = tracker_backed | local_only`
+- `tracker_network_required`
+- `planner_network_required`
+- `submit_requires_repo`
+- optional `submit_target_repo`
+- `dedupe_deferred`
 - candidates, proposals, dedupe-report, trace, manifest, planner prompt, and planner metadata paths
 
 Run IDs remain accepted as issue-set IDs for legacy run-generated proposals. New discovery/draft IDs are issue-set IDs and are not run IDs.
@@ -2714,6 +2727,8 @@ Run IDs remain accepted as issue-set IDs for legacy run-generated proposals. New
 
 For existing repositories without a prompt, drafting must be deterministic SDK policy and emit only rule/evidence-backed proposals. Prompt-based drafting may use a planner adapter, but it must emit concrete, scoped implementation proposals when the operator asks for a breakdown; it must not collapse such prompts into a generic "planning" placeholder issue. Proposal digests must exclude raw prompt text, raw local paths, tokens, timestamps, and raw inventory payloads.
 
+Stack/domain issue body templates are SDK-owned policy, not CLI string assembly. Selection precedence is `framework > explicit domain > stack > generic`. Template provenance and digest inputs include `template_id`, `template_family`, `template_variant`, and `template_version`. Initial families are `python`, `golang`, `rust`, `typescript`, `nextjs`, `pulumi`, `terraform`, `sql`, `postgres`, `clickhouse`, `kafka`, `valkey`, `protobuf`, `grpc`, and `generic`. Generated issue bodies must include Summary, Evidence, Scope, Acceptance Criteria, Architecture Boundaries, Quality Gates, Security/Data/Migration Notes, Test Plan, Agentactr Artifacts, and Dedupe/Related Issues.
+
 Codex-authored and Codex-reviewed proposal creation are explicit and fail-closed. `issue draft --codex-draft` writes at least `codex_issue_draft_prompt.txt`, `codex_issue_draft_schema.json`, `codex_issue_draft.stdout.jsonl`, `codex_issue_draft.stderr.log`, `codex_issue_draft_response.json`, and `codex_issue_draft_status.json`. `issue draft --codex-review` writes at least `codex_issue_review_prompt.txt`, `codex_issue_review.stdout.jsonl`, `codex_issue_review.stderr.log`, `codex_issue_review.md`, and `codex_issue_review_status.json`. `issue submit ... --require-codex-review` must refuse GitHub mutation unless the issue-set review status is approved and covers the selected proposal ID. Plain `issue submit --yes` remains available for explicit human-only review, but it must not imply LLM validation.
 
 `FrameworkDeclaration` is extensible and provider-neutral. It must not be a closed core enum. The default CLI may initially accept `nextjs` and `none`, represented as `{ ecosystem, id, version_or_profile }`.
@@ -2723,8 +2738,11 @@ Duplicate policy is mandatory before submission:
 - `unique`: eligible for `issue submit --yes`
 - `possible_duplicate`: requires `--allow-possible-duplicate --reason TEXT`, or an equivalent recorded operator rationale transition
 - `duplicate_blocked`: cannot be submitted
+- `deferred`: local draft placeholder only; must be recomputed against a concrete tracker target before mutation
 
 Title dedupe normalization must be versioned in `issue_dedupe_report.json`; the default normalization trims, collapses whitespace, lowercases, and preserves Unicode without secret-bearing inputs.
+
+For `draft_mode = local_only`, `agentactr issue submit ISSUE_SET_ID --proposal PROPOSAL_ID --repo OWNER/REPO --yes` requires an explicit concrete target repo. Config fallback is intentionally not used in this slice. The CLI rejects placeholders, `local:*`, empty values, and malformed repos before network calls. The SDK prepares a target submission proposal, fetches target repo candidates, recomputes dedupe, blocks exact duplicates, requires the existing possible-duplicate override policy for possible duplicates, and computes a separate `submission_digest`. The stored `IssueProposal.digest` remains the draft digest in the proposal artifact for compatibility; ledger keys and recovery markers use the target-bound `submission_digest`, and submit artifacts retain both `draft_digest` and `submission_digest`.
 
 Multi-agent issue submission is review-gated by default. Child/helper agents may propose tracker issues as artifacts, but they must not mutate GitHub directly.
 
@@ -2738,6 +2756,12 @@ Provider-neutral contracts:
 - `IssueMutationCapability`
 - `IssueSubmissionLedgerEntry`
 - `IssueSetArtifactContext`
+- `IssueDraftMode`
+- `IssueDedupeStatus::Deferred`
+- `PreparedIssueSubmissionProposal`
+- `IssueTemplateProfile`
+- `IssueTemplateContext`
+- `IssueTemplateRenderResult`
 - `FrameworkDeclaration`
 
 Sub-issue semantics are provider-neutral link semantics, not a GitHub-shaped core API. The GitHub adapter implements this as:
@@ -2772,6 +2796,8 @@ Issue creation idempotency is mandatory for all write adapters. The SDK ledger i
 ```text
 (issue_set_id, proposal_id, repo, parent_issue_key, proposal_digest)
 ```
+
+For tracker-backed drafts, `proposal_digest` is the stored proposal digest. For local-only drafts submitted to a target repo, `proposal_digest` is the computed `submission_digest`; the draft artifact keeps its original digest for audit and compatibility.
 
 `parent_issue` is optional. `parent_issue_key` must be stable for both parented sub-issue proposals and top-level issue proposals. Canonical values are `top_level` for absent parents and `parent:N` for a parent issue number. SQLite migrations must be additive: add `issue_set_id` and `parent_issue_key`, backfill from legacy `run_id` / `parent_issue`, switch reads/writes to the new identity, and only later deprecate legacy columns.
 
@@ -2974,7 +3000,7 @@ Status labels:
 - `implemented`: local `agentactr vcs diff RUN_ID [--output PATH]` writes a read-only workspace diff patch and metadata artifact through `VersionControl::diff`
 - `implemented`: local `agentactr vcs apply RUN_ID --check|--yes [--3way] [--allow-dirty]` validates or applies the recorded patch into the source checkout for manual merge workflows
 - `implemented`: local `agentactr merge plan RUN_ID [--json]` writes a read-only merge-risk artifact through `VersionControl::merge_plan`; default merge remains disabled
-- `partial`: typed `clap` top-level and nested generated help, generated shell completions, generated CLI Markdown reference, bootstrap-static `agentactr commands` / `agentactr commands --json` inventory, and read-only `agentactr menu` / `agentactr menu --json` navigator are implemented; per-command exhaustive help details, full documentation site generation, and interactive menu action execution remain pending
+- `partial`: typed `clap` top-level and nested generated help, generated shell completions, generated CLI Markdown reference, bootstrap-static `agentactr commands` / `agentactr commands --json` inventory, read-only `agentactr menu` / `agentactr menu --json` navigator, top-level color policy, and read-only `agentactr tui` snapshot/refresh rendering are implemented; per-command exhaustive help details, full documentation site generation, and interactive menu action execution remain pending
 - `pending`: local commit after gates
 - `pending`: cross-issue touched-file overlap detection
 

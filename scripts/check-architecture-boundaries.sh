@@ -53,6 +53,8 @@ require_text 'fn command_catalog' "agentactr-cli must keep command inventory in 
 require_text 'fn cmd_docs' "agentactr-cli must keep CLI docs rendering in the focused docs command module." crates/agentactr-cli/src/docs_command.rs
 require_text 'fn cmd_mcp' "agentactr-cli must keep stdio MCP serving in the focused MCP command module." crates/agentactr-cli/src/mcp_command.rs
 require_text 'fn cmd_trace' "agentactr-cli must keep trace inspection in the focused trace command module." crates/agentactr-cli/src/trace_command.rs
+require_text 'fn cmd_tui' "agentactr-cli must keep read-only TUI rendering in the focused TUI command module." crates/agentactr-cli/src/tui_command.rs
+require_text 'enum ColorMode' "agentactr-cli must keep terminal color policy in the focused terminal module." crates/agentactr-cli/src/terminal.rs
 require_text 'fn cmd_debug' "agentactr-cli must keep debug bundle assembly in the focused debug bundle module." crates/agentactr-cli/src/debug_bundle.rs
 require_text 'fn cmd_issue' "agentactr-cli must keep issue command dispatch in the focused issue command module." crates/agentactr-cli/src/issue_commands.rs
 require_text 'fn cmd_quality' "agentactr-cli must keep quality command dispatch in the focused quality command module." crates/agentactr-cli/src/quality_command.rs
@@ -69,7 +71,8 @@ forbid_text '^use crate::\*;' \
   "focused CLI command modules must import explicit dependencies instead of using crate-wide wildcard imports." \
   crates/agentactr-cli/src/issue_commands.rs \
   crates/agentactr-cli/src/quality_command.rs \
-  crates/agentactr-cli/src/setup_commands.rs
+  crates/agentactr-cli/src/setup_commands.rs \
+  crates/agentactr-cli/src/tui_command.rs
 require_text 'struct CliCodexMemorySupervisor' "agentactr-cli must own the current Codex memory supervisor wiring." crates/agentactr-cli/src/adapters.rs
 require_text 'struct LinuxMemoryController' "agentactr-cli must own the current Linux memory controller packaging shortcut." crates/agentactr-cli/src/linux_memory.rs
 require_text 'memory\.pressure' "Linux memory implementation must read PSI memory pressure evidence." crates/agentactr-cli/src/linux_memory.rs

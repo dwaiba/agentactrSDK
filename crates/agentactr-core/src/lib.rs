@@ -22,11 +22,12 @@ pub use domain::{
 };
 pub use issue_submission::{
     redaction_safe_issue_marker, FrameworkDeclaration, IssueAppliedMetadata, IssueCreateRequest,
-    IssueCreateResult, IssueDedupeStatus, IssueDraftRequest, IssueDraftResult, IssueFieldValue,
-    IssueLinkRequest, IssueLinkResult, IssueMutationCapability, IssueProjectFieldValue,
-    IssueProposal, IssueProposalId, IssueRequestedMetadata, IssueSetArtifactContext,
-    IssueSetSource, IssueSubmissionLedgerEntry, IssueSubmissionLedgerKey,
-    IssueSubmissionLedgerState,
+    IssueCreateResult, IssueDedupeStatus, IssueDraftMode, IssueDraftRequest, IssueDraftResult,
+    IssueFieldValue, IssueLinkRequest, IssueLinkResult, IssueMutationCapability,
+    IssueProjectFieldValue, IssueProposal, IssueProposalId, IssueRequestedMetadata,
+    IssueSetArtifactContext, IssueSetSource, IssueSubmissionLedgerEntry, IssueSubmissionLedgerKey,
+    IssueSubmissionLedgerState, IssueTemplateContext, IssueTemplateProfile,
+    IssueTemplateRenderResult,
 };
 pub use memory_attribution::{
     MemoryAttributionDecision, MemoryAttributionFailure, MemoryAttributionPolicy, MemoryBackend,
