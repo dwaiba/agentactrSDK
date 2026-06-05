@@ -470,9 +470,9 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "flume"
-version = "0.11.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da0e4dd2a88388a1f4ccc7c9ce104604dab68d9f408dc34cd45823d5a9069095"
+checksum = "5e139bc46ca777eb5efaf62df0ab8cc5fd400866427e56c68b22e414e53bd3be"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -481,9 +481,9 @@ dependencies = [
 
 [[package]]
 name = "foldhash"
-version = "0.1.5"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
@@ -610,9 +610,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.15.5"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
+checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
  "allocator-api2",
  "equivalent",
@@ -627,11 +627,11 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hashlink"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
+checksum = "ea0b22561a9c04a7cb1a302c013e0259cd3b4bb619f145b32f72b8b4bcbed230"
 dependencies = [
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
 ]
 
 [[package]]
@@ -1408,12 +1408,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
-name = "ryu"
-version = "1.0.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
-
-[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1518,18 +1512,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_urlencoded"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3491c14715ca2294c4d6a88f15e84739788c1d030eed8c110436aafdaa2f3fd"
-dependencies = [
- "form_urlencoded",
- "itoa",
- "ryu",
- "serde",
-]
-
-[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1615,12 +1597,13 @@ dependencies = [
 
 [[package]]
 name = "sqlx-core"
-version = "0.8.6"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee6798b1838b6a0f69c007c133b8df5866302197e404e8b6ee8ed3e3a5e68dc6"
+checksum = "05b44e85bf579a8eeb4ceaa77a3a523baf2bf0e9bac7e40f405d537b5d2d5ccb"
 dependencies = [
  "base64",
  "bytes",
+ "cfg-if",
  "crc",
  "crossbeam-queue",
  "either",
@@ -1629,12 +1612,11 @@ dependencies = [
  "futures-intrusive",
  "futures-io",
  "futures-util",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
  "hashlink",
  "indexmap",
  "log",
  "memchr",
- "once_cell",
  "percent-encoding",
  "sha2 0.10.9",
  "smallvec",
@@ -1647,12 +1629,13 @@ dependencies = [
 
 [[package]]
 name = "sqlx-sqlite"
-version = "0.8.6"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2d12fe70b2c1b4401038055f90f151b78208de1f9f89a7dbfd41587a10c3eea"
+checksum = "488e99c397a62007e4229aec669a179816339afc6d2620ca6fa420dbee2e982c"
 dependencies = [
  "atoi",
  "flume",
+ "form_urlencoded",
  "futures-channel",
  "futures-core",
  "futures-executor",
@@ -1661,7 +1644,6 @@ dependencies = [
  "libsqlite3-sys",
  "log",
  "percent-encoding",
- "serde_urlencoded",
  "sqlx-core",
  "thiserror",
  "tracing",

@@ -7237,8 +7237,9 @@ redact_secrets = false
         for workflow in [release, nightly] {
             assert!(workflow
                 .contains("depot/setup-action@15c09a5f77a0840ad4bce955686522a257853461 # v1"));
-            assert!(workflow
-                .contains("depot/build-push-action@5f3b3c2e5a00f0093de47f657aeaefcedff27d18 # v1"));
+            assert!(workflow.contains(
+                "depot/build-push-action@98e78adca7817480b8185f474a400b451d74e287 # v1.18.0"
+            ));
             assert!(workflow.contains("project: ${{ vars.DEPOT_PROJECT_ID }}"));
             assert!(workflow.contains("token: ${{ secrets.DEPOT_TOKEN }}"));
             assert!(!workflow.contains("docker/setup-buildx-action@"));

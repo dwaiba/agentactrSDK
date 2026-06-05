@@ -2505,12 +2505,13 @@ async fn add_issue_ledger_column(
     column: &str,
     definition: &str,
 ) -> Result<(), String> {
-    let escaped = column.replace('\'', "''");
     use sqlx_core::row::Row;
+    use sqlx_core::sql_str::AssertSqlSafe;
 
-    let row = sqlx_core::query::query(&format!(
-        "SELECT COUNT(*) FROM pragma_table_info('issue_submission_ledger') WHERE name = '{escaped}'"
-    ))
+    let row = sqlx_core::query::query(
+        "SELECT COUNT(*) FROM pragma_table_info('issue_submission_ledger') WHERE name = ?",
+    )
+    .bind(column)
     .fetch_one(pool)
     .await
     .map_err(|e| format!("inspect issue submission ledger schema: {e}"))?;
@@ -2518,12 +2519,12 @@ async fn add_issue_ledger_column(
         .try_get(0)
         .map_err(|e| format!("read issue submission ledger schema count: {e}"))?;
     if exists == 0 {
-        sqlx_core::query::query(&format!(
-            "ALTER TABLE issue_submission_ledger ADD COLUMN {column} {definition}"
-        ))
-        .execute(pool)
-        .await
-        .map_err(|e| format!("migrate issue submission ledger column {column}: {e}"))?;
+        let alter_sql =
+            format!("ALTER TABLE issue_submission_ledger ADD COLUMN {column} {definition}");
+        sqlx_core::query::query(AssertSqlSafe(alter_sql))
+            .execute(pool)
+            .await
+            .map_err(|e| format!("migrate issue submission ledger column {column}: {e}"))?;
     }
     Ok(())
 }

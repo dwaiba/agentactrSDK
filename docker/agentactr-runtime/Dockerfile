@@ -1,8 +1,8 @@
 # syntax=docker.io/docker/dockerfile-upstream:1.23.0
 
-ARG RUST_VERSION=1.95.0
+ARG RUST_VERSION=1.96.0
 
-FROM rust:1.95.0-trixie@sha256:39d8cb39a54e7d1da665c4fabfdd265e532a5f836c11ab5aee27fd5c73891ce4 AS agentactr-builder
+FROM rust:1.96.0-trixie@sha256:fb328f0f58becb23ba1719940a2c94ece8b0b48afa837d05b79ef64bc1e18f6e AS agentactr-builder
 
 WORKDIR /src
 
@@ -12,14 +12,14 @@ COPY crates ./crates
 RUN cargo build --locked --release --bin agentactr \
     && /src/target/release/agentactr --help >/dev/null
 
-FROM node:26.1.0-trixie-slim@sha256:424cafd2a035ed2b2d74acc3142b68b426fb62a47742c80a75e7117db02d6b30
+FROM node:26.2.0-trixie-slim@sha256:424cafd2a035ed2b2d74acc3142b68b426fb62a47742c80a75e7117db02d6b30
 
 ARG AGENTACTR_VERSION=0.1.0
 ARG CODEX_NPM_VERSION=0.130.0
 ARG CODEX_SDK_NPM_VERSION=0.130.0
 ARG GO_VERSION=1.26.3
 ARG GO_LINUX_ARM64_SHA256=9d89a3ea57d141c2b22d70083f2c8459ba3890f2d9e818e7e933b75614936565
-ARG RUST_VERSION=1.95.0
+ARG RUST_VERSION=1.96.0
 ARG UV_VERSION=0.11.13
 ARG CARGO_NEXTEST_VERSION=0.9.133
 ARG CARGO_DENY_VERSION=0.19.5
