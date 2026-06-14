@@ -472,47 +472,7 @@ impl CodexCliAdapter {
 
     fn run_issue_request(&self, req: &AgentIssueRunRequest) -> Result<(), String> {
         let child_reports = self.run_child_agents(req)?;
-        let issue_context_text = render_issue_context(&req.issue_context);
-        let spawn_context = render_spawn_context(req.spawn_plan.as_ref(), &child_reports);
-        let prompt = format!(
-            r#"You are the implementation agent for agentactr.
-
-Target GitHub issue: {}#{}
-Run id: {}
-Agent id: {}
-Agent role: {}
-Agent objective: {}
-Write scope: {}
-Context manifest: {}
-Spawn handoff manifest: {}
-
-Strict defaults:
-- Work only in this Git worktree.
-- Use the context manifest and agentactr MCP tools as read-only context sources.
-- Use spawned read-only helper artifacts as advisory context only; you remain the single writer.
-- Honor the configured Codex approval policy: {}.
-- Preserve SOLID boundaries and existing project style.
-- Run the applicable quality plan before final response.
-- If a network-dependent command is required and approval is unavailable, stop retrying and report the blocker with the exact rerun guidance `--human-intervention interactive --codex-approval on-request`.
-- If required context or authorization is missing, fail explicitly.
-
-Issue context:
-{issue_context_text}
-
-Spawn context:
-{spawn_context}
-"#,
-            req.repo,
-            req.issue,
-            req.run_id,
-            req.agent_run_id,
-            req.role,
-            req.objective,
-            req.write_scope,
-            req.context_manifest.display(),
-            req.artifact_dir.join("spawn_handoffs.json").display(),
-            codex_approval_config_value(req.approval_policy)
-        );
+        let prompt = render_issue_prompt(req, &child_reports);
         self.run_codex_exec(req, &prompt, &self.sandbox_mode, self.timeout, "codex")?;
         Ok(())
     }
@@ -786,6 +746,54 @@ fn join_child_agent_threads(
     } else {
         Ok(reports)
     }
+}
+
+fn render_issue_prompt(
+    req: &AgentIssueRunRequest,
+    child_reports: &[CodexChildRunReport],
+) -> String {
+    let issue_context_text = render_issue_context(&req.issue_context);
+    let spawn_context = render_spawn_context(req.spawn_plan.as_ref(), child_reports);
+    let typescript_guidance = render_typescript_project_guidance(&req.context_manifest);
+    format!(
+        r#"You are the implementation agent for agentactr.
+
+Target GitHub issue: {}#{}
+Run id: {}
+Agent id: {}
+Agent role: {}
+Agent objective: {}
+Write scope: {}
+Context manifest: {}
+Spawn handoff manifest: {}
+
+Strict defaults:
+- Work only in this Git worktree.
+- Use the context manifest and agentactr MCP tools as read-only context sources.
+- Use spawned read-only helper artifacts as advisory context only; you remain the single writer.
+- Honor the configured Codex approval policy: {}.
+- Preserve SOLID boundaries and existing project style.
+- Run the applicable quality plan before final response.
+- If a network-dependent command is required and approval is unavailable, stop retrying and report the blocker with the exact rerun guidance `--human-intervention interactive --codex-approval on-request`.
+- If required context or authorization is missing, fail explicitly.
+{typescript_guidance}
+Issue context:
+{issue_context_text}
+
+Spawn context:
+{spawn_context}
+"#,
+        req.repo,
+        req.issue,
+        req.run_id,
+        req.agent_run_id,
+        req.role,
+        req.objective,
+        req.write_scope,
+        req.context_manifest.display(),
+        req.artifact_dir.join("spawn_handoffs.json").display(),
+        codex_approval_config_value(req.approval_policy)
+    )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1568,6 +1576,7 @@ fn child_request_from_node(req: &AgentIssueRunRequest, node: &AgentNode) -> Agen
 }
 
 fn render_child_prompt(req: &AgentIssueRunRequest) -> String {
+    let typescript_guidance = render_typescript_project_guidance(&req.context_manifest);
     format!(
         r#"You are a read-only helper agent for agentactr.
 
@@ -1585,6 +1594,7 @@ Strict helper rules:
 - Inspect only what is needed for your objective.
 - Write a concise handoff in your final response with file paths, risks, and recommended next steps for the single writer.
 - If context is missing, state that explicitly instead of guessing.
+{typescript_guidance}
 
 Issue context:
 {}
@@ -1599,6 +1609,39 @@ Issue context:
         req.context_manifest.display(),
         render_issue_context(&req.issue_context)
     )
+}
+
+fn render_typescript_project_guidance(context_manifest: &Path) -> String {
+    if !context_manifest_selects_typescript(context_manifest) {
+        return String::new();
+    }
+    r#"
+TypeScript project guidance:
+- Treat TypeScript strictly: preserve type safety, avoid broad `any`, unchecked casts, and silent runtime shape assumptions.
+- Keep framework, transport, provider, and persistence concerns behind explicit boundaries; do not mix route/UI code with domain logic.
+- Validate runtime inputs at boundaries with the repository's schema-validation pattern when one exists, and keep schemas, types, and tests aligned.
+- Respect the detected package manager and existing tooling; do not introduce alternate formatters, linters, test runners, ORMs, queues, or infrastructure frameworks unless already used or explicitly required.
+- For frontend frameworks such as Next.js, keep server-only code out of client bundles and never expose server secrets through public environment variables.
+- Preserve the existing design system, component primitives, token names, spacing/radius conventions, and accessibility expectations instead of hard-coding visual drift.
+- Run the selected TypeScript quality gates before handoff; if a gate cannot run, report the exact blocker and rerun command.
+
+"#
+    .to_string()
+}
+
+fn context_manifest_selects_typescript(context_manifest: &Path) -> bool {
+    let Ok(content) = fs::read_to_string(context_manifest) else {
+        return false;
+    };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    let repository = parsed.get("repository").unwrap_or(&parsed);
+    ["selected_stack", "primary_stack", "detected_stack"]
+        .iter()
+        .filter_map(|key| repository.get(key))
+        .filter_map(serde_json::Value::as_str)
+        .any(|value| value.eq_ignore_ascii_case("typescript"))
 }
 
 fn render_spawn_context(plan: Option<&SpawnPlan>, reports: &[CodexChildRunReport]) -> String {
@@ -2477,6 +2520,100 @@ sandbox_mode = "workspace-write"
     }
 
     #[test]
+    fn issue_prompt_includes_generic_typescript_guidance_for_typescript_context() {
+        let root = temp_root("typescript-guidance");
+        fs::create_dir_all(&root).unwrap();
+        let context_manifest = root.join("context_manifest.json");
+        fs::write(
+            &context_manifest,
+            r#"{"repository":{"selected_stack":"typescript","detected_stack":"typescript"}}"#,
+        )
+        .unwrap();
+        let request = AgentIssueRunRequest {
+            run_id: "run-1".to_string(),
+            agent_run_id: "agent-1".to_string(),
+            role: "Implementer".to_string(),
+            objective: "Implement issue".to_string(),
+            write_scope: "workspace".to_string(),
+            worktree: root.clone(),
+            artifact_dir: root.clone(),
+            context_manifest,
+            repo: "OWNER/REPO".to_string(),
+            issue: "42".to_string(),
+            issue_context: Issue {
+                title: "TypeScript issue".to_string(),
+                ..Issue::default()
+            },
+            approval_policy: RuntimeApprovalPolicy::Never,
+            ..AgentIssueRunRequest::default()
+        };
+
+        let prompt = render_issue_prompt(&request, &[]);
+        let _ = fs::remove_dir_all(root);
+
+        assert!(prompt.contains("TypeScript project guidance:"));
+        assert!(prompt.contains("Keep framework, transport, provider, and persistence concerns"));
+        assert!(prompt.contains("never expose server secrets through public environment variables"));
+        assert!(!prompt.contains("Genome"));
+        assert!(!prompt.contains("genome"));
+    }
+
+    #[test]
+    fn typescript_guidance_is_omitted_for_non_typescript_context() {
+        let root = temp_root("non-typescript-guidance");
+        fs::create_dir_all(&root).unwrap();
+        let context_manifest = root.join("context_manifest.json");
+        fs::write(
+            &context_manifest,
+            r#"{"repository":{"selected_stack":"rust","detected_stack":"rust"}}"#,
+        )
+        .unwrap();
+        let request = AgentIssueRunRequest {
+            run_id: "run-1".to_string(),
+            agent_run_id: "agent-1".to_string(),
+            context_manifest,
+            repo: "OWNER/REPO".to_string(),
+            issue: "42".to_string(),
+            ..AgentIssueRunRequest::default()
+        };
+
+        let prompt = render_issue_prompt(&request, &[]);
+        let child_prompt = render_child_prompt(&request);
+        let _ = fs::remove_dir_all(root);
+
+        assert!(!prompt.contains("TypeScript project guidance:"));
+        assert!(!child_prompt.contains("TypeScript project guidance:"));
+    }
+
+    #[test]
+    fn child_prompt_includes_typescript_guidance_for_helper_agents() {
+        let root = temp_root("child-typescript-guidance");
+        fs::create_dir_all(&root).unwrap();
+        let context_manifest = root.join("context_manifest.json");
+        fs::write(
+            &context_manifest,
+            r#"{"repository":{"selected_stack":"typescript"}}"#,
+        )
+        .unwrap();
+        let request = AgentIssueRunRequest {
+            run_id: "run-1".to_string(),
+            agent_run_id: "agent-child-1".to_string(),
+            role: "RepoExplorer".to_string(),
+            objective: "Inspect TypeScript issue".to_string(),
+            context_manifest,
+            repo: "OWNER/REPO".to_string(),
+            issue: "42".to_string(),
+            ..AgentIssueRunRequest::default()
+        };
+
+        let prompt = render_child_prompt(&request);
+        let _ = fs::remove_dir_all(root);
+
+        assert!(prompt.contains("TypeScript project guidance:"));
+        assert!(prompt.contains("selected TypeScript quality gates"));
+    }
+
+    #[test]
     fn spawn_handoff_manifest_references_child_prompt_artifacts() {
         let root = temp_root("codex-spawn-handoff");
         let child_dir = root.join("child-1");
@@ -2529,10 +2666,7 @@ sandbox_mode = "workspace-write"
     }
 
     fn render_prompt_for_test(req: &AgentIssueRunRequest) -> String {
-        format!(
-            "Target GitHub issue: {}#{}\nRun id: {}\n{}",
-            req.repo, req.issue, req.run_id, req.issue_context.title
-        )
+        render_issue_prompt(req, &[])
     }
 
     fn temp_root(name: &str) -> PathBuf {

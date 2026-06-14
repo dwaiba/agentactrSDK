@@ -519,12 +519,14 @@ fn typescript_scaffold(project_name: &str) -> BootstrapScaffold {
             ),
             scaffold_file(
                 "README.md",
-                format!("# {project_name}\n\n## Start\n\n```bash\nbun install\nbun run lint\nbun run typecheck\nbun test\nbun run build\n```\n"),
+                format!("# {project_name}\n\n## Start\n\n```bash\nbun install\nbunx skills add pbakaus/impeccable\nbunx skills add https://github.com/magicpathai/agent-skills --skill magicpath\nbun run lint\nbun run typecheck\nbun test\nbun run build\n```\n"),
             ),
             scaffold_file(".gitignore", "node_modules/\ndist/\ncoverage/\n"),
         ],
         start_commands: vec![
             "bun install",
+            "bunx skills add pbakaus/impeccable",
+            "bunx skills add https://github.com/magicpathai/agent-skills --skill magicpath",
             "bun run lint",
             "bun run typecheck",
             "bun test",
@@ -913,8 +915,20 @@ mod tests {
 
         assert!(ts_test.contents.contains("from \"../src/index.js\""));
         assert!(ts_readme.contents.contains("bun install\n"));
+        assert!(ts_readme
+            .contents
+            .contains("bunx skills add pbakaus/impeccable"));
+        assert!(ts_readme.contents.contains(
+            "bunx skills add https://github.com/magicpathai/agent-skills --skill magicpath"
+        ));
         assert!(!ts_readme.contents.contains("--frozen-lockfile"));
         assert!(typescript.start_commands.contains(&"bun install"));
+        assert!(typescript
+            .start_commands
+            .contains(&"bunx skills add pbakaus/impeccable"));
+        assert!(typescript.start_commands.contains(
+            &"bunx skills add https://github.com/magicpathai/agent-skills --skill magicpath"
+        ));
         assert!(!typescript
             .start_commands
             .iter()
