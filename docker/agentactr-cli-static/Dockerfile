@@ -1,7 +1,7 @@
 # syntax=docker.io/docker/dockerfile-upstream:1.23.0
 
 ARG RUST_VERSION=1.96.0
-FROM rust:1.96.0-trixie@sha256:fb328f0f58becb23ba1719940a2c94ece8b0b48afa837d05b79ef64bc1e18f6e AS builder
+FROM rust:1.96.1-trixie@sha256:1f0dbad1df66647807e6952d1db85d0b2bda7606cb2139d82517e4f009967376 AS builder
 
 ARG AGENTACTR_VERSION=0.1.0
 ARG TARGET=aarch64-unknown-linux-musl
