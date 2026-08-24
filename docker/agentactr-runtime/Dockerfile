@@ -2,7 +2,7 @@
 
 ARG RUST_VERSION=1.96.0
 
-FROM rust:1.96.0-trixie@sha256:fb328f0f58becb23ba1719940a2c94ece8b0b48afa837d05b79ef64bc1e18f6e AS agentactr-builder
+FROM rust:1.98.0-trixie@sha256:7f7a53a25a0319dd8284e279d529d45759cb384d59b14cc6806132910f45522e AS agentactr-builder
 
 WORKDIR /src
 
