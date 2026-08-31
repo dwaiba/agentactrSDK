@@ -12,7 +12,7 @@ COPY crates ./crates
 RUN cargo build --locked --release --bin agentactr \
     && /src/target/release/agentactr --help >/dev/null
 
-FROM node:26.3.0-trixie-slim@sha256:aa27a5fbf5acb298116a38133794f080406c6f8dfe52e2e2836bb55dc7cae8f0
+FROM node:26.8.1-trixie-slim@sha256:c0753125a3789977aefe869cbebccf70e3cfd7ea84ca48547458f02e4f1d7146
 
 ARG AGENTACTR_VERSION=0.1.0
 ARG CODEX_NPM_VERSION=0.130.0
